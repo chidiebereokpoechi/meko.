@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import { config } from "@/config.ts";
 import { ctxLog } from "@/lib/logger.ts";
 import { appendUpdate, compactBoard, loadDoc } from "@/realtime/persistence.ts";
-import { publishPresence, publishUpdate, startPresenceSubscriber, startRoomSubscriber } from "@/realtime/room-sync.ts";
+import { publishComment, publishPresence, publishUpdate, startCommentSubscriber, startPresenceSubscriber, startRoomSubscriber } from "@/realtime/room-sync.ts";
 
 // Framework-agnostic view of a connected socket so the room manager doesn't depend on Elysia.
 export interface LocalClient {
@@ -28,6 +28,7 @@ export class RoomManager {
     this.started = true;
     startRoomSubscriber((boardId, update) => this.onRemoteUpdate(boardId, update));
     startPresenceSubscriber((boardId, payload) => this.onRemotePresence(boardId, payload));
+    startCommentSubscriber((boardId) => this.fanOutComment(boardId));
   }
 
   private async getOrCreate(boardId: string): Promise<Room> {
@@ -81,6 +82,20 @@ export class RoomManager {
     const room = this.rooms.get(boardId);
     if (!room) return;
     const json = JSON.stringify(payload);
+    for (const client of room.clients.values()) client.sendText(json);
+  }
+
+  // A new comment was posted (over HTTP). Notify this node's local clients and other nodes; the
+  // notification is a signal — clients refetch the thread on receipt.
+  broadcastComment(boardId: string): void {
+    this.fanOutComment(boardId);
+    void publishComment(boardId, { type: "comment" });
+  }
+
+  private fanOutComment(boardId: string): void {
+    const room = this.rooms.get(boardId);
+    if (!room) return;
+    const json = JSON.stringify({ type: "comment" });
     for (const client of room.clients.values()) client.sendText(json);
   }
 

@@ -6,6 +6,7 @@ import { requireAuth } from "@/auth/middleware.ts";
 import { requireBoardAccess } from "@/lib/permissions.ts";
 import { decodeCursor, page, PAGE_SIZE } from "@/lib/pagination.ts";
 import { audit } from "@/lib/audit.ts";
+import { roomManager } from "@/realtime/room.ts";
 
 export const boardRoutes = new Elysia({ prefix: "/api/boards" })
   .use(requireAuth)
@@ -58,6 +59,7 @@ export const boardRoutes = new Elysia({ prefix: "/api/boards" })
     async ({ userId, params, body }) => {
       await requireBoardAccess(userId!, params.id, "view");
       const [comment] = await db.insert(comments).values({ boardId: params.id, authorId: userId!, body: body.body }).returning();
+      roomManager.broadcastComment(params.id); // notify live clients to refetch the thread
       return comment;
     },
     { body: t.Object({ body: t.String({ minLength: 1, maxLength: 10_000 }) }) },

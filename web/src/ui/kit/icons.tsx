@@ -32,4 +32,7 @@ export const NumberListIcon = svg(<path d="M10 6h10M10 12h10M10 18h10M4 5v3M3 12
 export const LinkToolIcon = LinkIcon;
 export const UsersIcon = svg(<><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="8" r="4" /><path d="M22 20v-2a4 4 0 0 0-3-3.87M16 4.13a4 4 0 0 1 0 7.75" /></>);
 export const CheckIcon = svg(<path d="m5 13 4 4L19 7" />);
+export const ChatIcon = svg(<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z" />);
+export const CloseIcon = svg(<path d="M6 6l12 12M18 6 6 18" />);
+export const SendIcon = svg(<path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />);
 

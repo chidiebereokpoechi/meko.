@@ -10,6 +10,7 @@ import { NoteSubRail } from "./NoteSubRail.tsx";
 import { LinkSubRail } from "./LinkSubRail.tsx";
 import { ImageSubRail } from "./ImageSubRail.tsx";
 import { CommonSubRail } from "./CommonSubRail.tsx";
+import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
 import { sanitizeHtml } from "../lib/sanitize.ts";
@@ -61,12 +62,20 @@ export function Canvas({
   const spaceRef = useRef(false); // space held → drag pans instead of marquees
   const [captionEditing, setCaptionEditing] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
+  const [showComments, setShowComments] = useState(false);
+  const showCommentsRef = useRef(false);
+  const [commentSignal, setCommentSignal] = useState(0);
+  const [unreadComments, setUnreadComments] = useState(false);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
     connRef.current = c;
     c.onStatus = setStatus;
     c.onPresence = setPeers;
+    c.onComment = () => {
+      setCommentSignal((s) => s + 1);
+      if (!showCommentsRef.current) setUnreadComments(true);
+    };
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
 
@@ -718,8 +727,22 @@ export function Canvas({
         }}
         onDrop={onDrop}
       >
-        <div className="absolute right-4 top-4 z-30">
+        <div className="absolute right-4 top-4 z-30 flex items-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
           <Badge tone={status === "online" ? "green" : "slate"}>{status}</Badge>
+          <button
+            onClick={() => {
+              const next = !showComments;
+              setShowComments(next);
+              showCommentsRef.current = next;
+              if (next) setUnreadComments(false);
+            }}
+            aria-label="Comments"
+            title="Comments"
+            className={`relative grid h-8 w-8 place-items-center rounded-lg border-2 shadow-sm ${showComments ? "border-primary bg-primary text-white" : "border-slate-100 bg-white text-slate-500 hover:text-primary"}`}
+          >
+            <Icon.ChatIcon className="text-base" />
+            {unreadComments && !showComments && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-primary" />}
+          </button>
         </div>
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-20 m-2 rounded-xl border-2 border-dashed border-primary bg-primary/5" />
@@ -795,6 +818,15 @@ export function Canvas({
           </div>
         </div>
       </div>
+      <CommentsPanel
+        boardId={boardId}
+        open={showComments}
+        signal={commentSignal}
+        onClose={() => {
+          setShowComments(false);
+          showCommentsRef.current = false;
+        }}
+      />
     </div>
   );
 }

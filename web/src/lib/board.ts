@@ -28,6 +28,8 @@ export class BoardConnection {
   // Live peer cursors, keyed by server-assigned clientId. Ephemeral — never persisted.
   readonly peers = new Map<string, Peer>();
   onPresence?: (peers: Peer[]) => void;
+  // Fired when a peer posts a comment (server pushes a signal; the panel refetches the thread).
+  onComment?: () => void;
   private lastCursorSent = 0;
   private selfUserId: string | null = null;
 
@@ -100,6 +102,10 @@ export class BoardConnection {
     }
     if (m.type === "hello") {
       this.selfUserId = m.userId ?? null;
+      return;
+    }
+    if (m.type === "comment") {
+      this.onComment?.();
       return;
     }
     if (m.type === "presence" && m.clientId && m.cursor) {

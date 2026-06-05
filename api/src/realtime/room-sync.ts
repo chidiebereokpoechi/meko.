@@ -8,6 +8,7 @@ import { ctxLog } from "@/lib/logger.ts";
 
 const channel = (boardId: string) => `room:${boardId}`;
 const presenceChannel = (boardId: string) => `presence:${boardId}`;
+const commentChannel = (boardId: string) => `comment:${boardId}`;
 
 interface Envelope {
   nodeId: string;
@@ -49,6 +50,33 @@ export function startRoomSubscriber(onRemote: (boardId: string, update: Uint8Arr
     if (env.nodeId === config.NODE_ID) return; // skip our own broadcast
     const boardId = chan.slice("room:".length);
     onRemote(boardId, new Uint8Array(Buffer.from(env.update, "base64")));
+  });
+}
+
+// New-comment notification across nodes. The payload is a small signal; clients refetch on it.
+// Unlike presence, the publishing node DOES want its own local clients notified (the poster came
+// in over HTTP, not a WS), so the room manager fans out locally itself and only OTHER nodes are
+// reached via this channel.
+export async function publishComment(boardId: string, payload: unknown): Promise<void> {
+  const env: PresenceEnvelope = { nodeId: config.NODE_ID, payload };
+  await redisPub.publish(commentChannel(boardId), JSON.stringify(env));
+}
+
+export function startCommentSubscriber(onRemote: (boardId: string, payload: unknown) => void): void {
+  redisSub.psubscribe("comment:*", (err) => {
+    if (err) ctxLog().error({ err, action: "comment.psubscribe_fail" }, "failed to psubscribe");
+  });
+
+  redisSub.on("pmessage", (_pattern, chan, raw) => {
+    if (!chan.startsWith("comment:")) return;
+    let env: PresenceEnvelope;
+    try {
+      env = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (env.nodeId === config.NODE_ID) return;
+    onRemote(chan.slice("comment:".length), env.payload);
   });
 }
 
