@@ -1,0 +1,20 @@
+# meko. web — static SPA build served by nginx for the VPS NPM proxy to forward to.
+#
+# VITE_API_URL is build-time (Vite inlines it into the bundle), so it's a build arg.
+# WEB_PORT is the host port NPM forwards to (scheme http, enable Websockets not needed here).
+#
+# Usage:
+#   docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml up -d --build
+
+name: meko-web
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:?set VITE_API_URL}
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8080}:80"
+    restart: unless-stopped
