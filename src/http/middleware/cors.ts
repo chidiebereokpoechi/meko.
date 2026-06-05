@@ -14,7 +14,7 @@ export const cors = new Elysia({ name: "cors" })
       set.headers["vary"] = "Origin";
     }
     set.headers["access-control-allow-methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
-    set.headers["access-control-allow-headers"] = "Content-Type, X-Request-ID, Idempotency-Key";
+    set.headers["access-control-allow-headers"] = "Authorization, Content-Type, X-Request-ID, Idempotency-Key";
     set.headers["access-control-max-age"] = "86400";
 
     if (request.method === "OPTIONS") {
