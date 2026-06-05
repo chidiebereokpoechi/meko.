@@ -47,11 +47,16 @@ export function App() {
     setPhase("login");
   };
 
-  if (phase === "loading") return <div className="grid h-screen place-items-center text-slate-400">Loading…</div>;
+  if (phase === "loading")
+    return (
+      <div className="grid h-screen place-items-center text-slate-400">
+        Loading…
+      </div>
+    );
   if (phase === "login") return <Login onAuthed={onAuthed} />;
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100">
+    <div className="flex h-screen flex-col bg-white">
       <TopBar
         workspaces={workspaces}
         activeWs={activeWs}
@@ -81,7 +86,10 @@ export function App() {
         label="Workspace name"
         onClose={() => setNewWs(false)}
         onSubmit={async (name) => {
-          const ws = await api<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) });
+          const ws = await api<Workspace>("/api/workspaces", {
+            method: "POST",
+            body: JSON.stringify({ name }),
+          });
           await loadWorkspaces();
           setActiveWs(ws.id);
           toast("Workspace created", "success");

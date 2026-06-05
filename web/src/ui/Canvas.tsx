@@ -243,7 +243,8 @@ function ElementCard({
   const endResize = () => (size.current = null);
 
   const s = el.style ?? {};
-  const textStyle: CSSProperties = { color: s.color ?? "#1f2937", fontWeight: s.fontWeight ?? "normal", fontSize: s.fontSize ?? 14, textAlign: s.align ?? "left" };
+  // lineHeight is unitless so it scales with fontSize (otherwise large text overlaps).
+  const textStyle: CSSProperties = { color: s.color ?? "#1f2937", fontWeight: s.fontWeight ?? "normal", fontSize: s.fontSize ?? 14, lineHeight: 1.35, textAlign: s.align ?? "left" };
 
   return (
     <div
@@ -251,7 +252,8 @@ function ElementCard({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onClick={onClick}
-      className={`absolute rounded-lg border bg-white shadow-md ${selected ? "border-primary ring-2 ring-primary/30" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"}`}
+      // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
+      className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"}`}
       style={{ left: el.x, top: el.y, width: el.w, height: el.h, background: isText ? s.fill ?? "#ffffff" : "#fff" }}
     >
       {isText ? (

@@ -45,7 +45,7 @@ export function NoteSubRail({
     <nav className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
       <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
       <div ref={colorRef} className="w-full">
-        <RailBtn label="Color" active={colorOpen} icon={<span className="h-4 w-4 rounded border border-slate-300" style={{ background: el.style?.fill ?? "#ffffff" }} />} onClick={() => setColorOpen((o) => !o)} />
+        <RailBtn label="Color" active={colorOpen} icon={<span className="h-5 w-5 rounded-md ring-1 ring-inset ring-slate-300" style={{ background: el.style?.fill ?? "#ffffff" }} />} onClick={() => setColorOpen((o) => !o)} />
       </div>
 
       {/* Text formatting only applies while the caret is in the note (edit mode). */}
