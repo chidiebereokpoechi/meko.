@@ -64,7 +64,7 @@ export function BoardSubRail({
 
       {colorOpen && (
         <Popover top={colorRef.current?.offsetTop ?? 0}>
-          <ColorTabs onFill={onFill} onStrip={onStrip} />
+          <ColorTabs fill={el.style?.fill} strip={el.style?.strip} onFill={onFill} onStrip={onStrip} />
         </Popover>
       )}
     </nav>

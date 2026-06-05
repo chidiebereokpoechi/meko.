@@ -119,6 +119,19 @@ function Shell({
         canRedo={!!controls?.canRedo}
         onExport={controls?.exportPng}
         onShare={boardId ? () => setShare(true) : undefined}
+        view={
+          controls && boardId
+            ? {
+                zoomIn: controls.zoomIn,
+                zoomOut: controls.zoomOut,
+                resetView: controls.resetView,
+                zoomToFit: controls.zoomToFit,
+                toggleGrid: controls.toggleGrid,
+                gridOn: controls.gridOn,
+                zoomPct: controls.zoomPct,
+              }
+            : undefined
+        }
       />
       <Outlet />
       {boardId && workspaceId && (

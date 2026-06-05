@@ -29,6 +29,13 @@ export interface BoardControls {
   canUndo: boolean;
   canRedo: boolean;
   exportPng: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetView: () => void;
+  zoomToFit: () => void;
+  toggleGrid: () => void;
+  gridOn: boolean;
+  zoomPct: number;
 }
 
 export function Canvas({
@@ -77,6 +84,9 @@ export function Canvas({
   const [commentSignal, setCommentSignal] = useState(0);
   const [unreadComments, setUnreadComments] = useState(false);
   const [urlChoice, setUrlChoice] = useState<{ u: Unfurl; url: string; at: { x: number; y: number } } | null>(null);
+  const [showGrid, setShowGrid] = useState(true);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -90,24 +100,21 @@ export function Canvas({
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
 
-    // Surface undo/redo state to the top bar.
+    // Mirror undo/redo availability into state; the controls publisher (below) builds the full
+    // BoardControls object whenever undo state or the view changes.
     const mgr = c.undoMgr;
-    const pushControls = () =>
-      onControls({
-        undo: () => c.undo(),
-        redo: () => c.redo(),
-        canUndo: mgr.canUndo(),
-        canRedo: mgr.canRedo(),
-        exportPng: () => onExport(),
-      });
-    mgr.on("stack-item-added", pushControls);
-    mgr.on("stack-item-popped", pushControls);
-    pushControls();
+    const sync = () => {
+      setCanUndo(mgr.canUndo());
+      setCanRedo(mgr.canRedo());
+    };
+    mgr.on("stack-item-added", sync);
+    mgr.on("stack-item-popped", sync);
+    sync();
 
     void c.connect();
     return () => {
-      mgr.off("stack-item-added", pushControls);
-      mgr.off("stack-item-popped", pushControls);
+      mgr.off("stack-item-added", sync);
+      mgr.off("stack-item-popped", sync);
       c.elements.unobserve(bump);
       c.destroy();
       connRef.current = null;
@@ -314,6 +321,42 @@ export function Canvas({
     const r = viewportRef.current?.getBoundingClientRect();
     if (r) zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(z) / view.zoom);
   };
+
+  // --- View options (surfaced to the top bar's View menu) ---
+  const resetView = () => setView(clampView({ zoom: 1, x: 0, y: 0 }));
+  const zoomToFit = () => {
+    const vp = viewportRef.current?.getBoundingClientRect();
+    if (!vp || elements.length === 0) return resetView();
+    const minX = Math.min(...elements.map((e) => e.x));
+    const minY = Math.min(...elements.map((e) => e.y));
+    const maxX = Math.max(...elements.map((e) => e.x + e.w));
+    const maxY = Math.max(...elements.map((e) => e.y + e.h));
+    const pad = 80;
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const zoom = clampZoom(Math.min((vp.width - pad * 2) / bw, (vp.height - pad * 2) / bh));
+    setView(clampView({ zoom, x: (vp.width - bw * zoom) / 2 - minX * zoom, y: (vp.height - bh * zoom) / 2 - minY * zoom }));
+  };
+
+  // Publish the full control set whenever undo state or the view changes (the undo events feed
+  // canUndo/canRedo above; zoom/grid come from local state).
+  useEffect(() => {
+    onControls({
+      undo: () => connRef.current?.undo(),
+      redo: () => connRef.current?.redo(),
+      canUndo,
+      canRedo,
+      exportPng: () => onExport(),
+      zoomIn: () => setZoom(view.zoom * 1.2),
+      zoomOut: () => setZoom(view.zoom / 1.2),
+      resetView,
+      zoomToFit,
+      toggleGrid: () => setShowGrid((g) => !g),
+      gridOn: showGrid,
+      zoomPct: Math.round(view.zoom * 100),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canUndo, canRedo, view.zoom, showGrid, boardId]);
 
   // Wheel: ⌘/Ctrl (or pinch) zooms toward the cursor; otherwise pans. Native listener so we can
   // preventDefault (React's onWheel is passive).
@@ -909,7 +952,7 @@ export function Canvas({
         <div className="h-full w-full">
           <div
             ref={surfaceRef}
-            className="absolute left-0 top-0 origin-top-left bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)] [background-size:24px_24px]"
+            className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)]" : ""}`}
             style={{ width: WORLD_W, height: WORLD_H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
           >
             {elements.map((el) => (
