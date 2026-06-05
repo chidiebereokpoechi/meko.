@@ -43,7 +43,8 @@ export function EditableNote({
 
   // Focus the text when entering edit mode.
   useEffect(() => {
-    if (editing && ref.current && document.activeElement !== ref.current) ref.current.focus();
+    if (editing && ref.current && document.activeElement !== ref.current)
+      ref.current.focus();
   }, [editing]);
 
   return (
@@ -51,11 +52,15 @@ export function EditableNote({
       ref={ref}
       contentEditable={editing}
       suppressContentEditableWarning
-      data-empty-placeholder="›"
-      className="note-editable h-full w-full overflow-auto p-2 outline-none"
+      data-empty-placeholder="Start typing..."
+      className="note-editable h-full w-full overflow-auto p-4 outline-none"
       style={style}
-      onFocus={() => onRegister({ el: ref.current!, commit: () => onText(sanitizeHtml(ref.current!.innerHTML)) })}
-      onBlur={() => onRegister(null)}
+      onFocus={() =>
+        onRegister({
+          el: ref.current!,
+          commit: () => onText(sanitizeHtml(ref.current!.innerHTML)),
+        })
+      }
       onInput={() => onText(sanitizeHtml(ref.current!.innerHTML))}
     />
   );

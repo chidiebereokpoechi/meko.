@@ -18,6 +18,8 @@ const Style = z
     fontWeight: z.enum(["normal", "bold"]).optional(),
     color: Hex.optional(),
     align: z.enum(["left", "center", "right"]).optional(),
+    // Coloured top strip across the top edge of a note (Milanote pattern); absent = no strip.
+    strip: Hex.optional(),
   })
   .strict();
 

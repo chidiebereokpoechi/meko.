@@ -10,6 +10,7 @@ export interface ElementStyle {
   fontWeight?: "normal" | "bold";
   color?: string;
   align?: "left" | "center" | "right";
+  strip?: string;
 }
 
 interface Base {

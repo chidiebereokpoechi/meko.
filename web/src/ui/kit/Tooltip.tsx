@@ -9,7 +9,7 @@ export function Tooltip({ label, shortcut, side = "right", children }: { label: 
     <span className="relative inline-flex" onPointerEnter={() => setShow(true)} onPointerLeave={() => setShow(false)}>
       {children}
       {show && (
-        <span className={`pointer-events-none absolute z-50 flex items-center gap-2 whitespace-nowrap rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-white shadow-lg ${pos}`}>
+        <span className={`pointer-events-none absolute z-[80] flex items-center gap-2 whitespace-nowrap rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-white shadow-lg ${pos}`}>
           {label}
           {shortcut && <span className="text-slate-400">{shortcut}</span>}
         </span>

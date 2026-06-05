@@ -24,6 +24,7 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
   const deleteRef = useRef<HTMLDivElement>(null);
   const dropCoords = useRef<{ x: number; y: number } | null>(null);
   const editorRef = useRef<ActiveEditor | null>(null);
+  const savedRange = useRef<Range | null>(null);
   const [, setTick] = useState(0);
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [busy, setBusy] = useState(false);
@@ -136,15 +137,36 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Run a rich-text command on the focused note editor, then persist its sanitised HTML.
+  // Run a rich-text command on the focused note editor, then persist its sanitised HTML. Restore
+  // the last in-editor selection first: interacting with the colour picker can collapse it, which
+  // would otherwise make hiliteColor/foreColor apply to nothing.
   const exec = (command: string, value?: string) => {
     const ed = editorRef.current;
     if (!ed) return;
     ed.el.focus();
+    const sel = window.getSelection();
+    if (savedRange.current && sel) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+    }
     document.execCommand("styleWithCSS", false, "true");
     document.execCommand(command, false, value);
     ed.commit();
   };
+
+  // Remember the selection while it's inside the focused note, so exec() can restore it.
+  useEffect(() => {
+    const onSel = () => {
+      const ed = editorRef.current?.el;
+      const sel = window.getSelection();
+      if (ed && sel && sel.rangeCount) {
+        const r = sel.getRangeAt(0);
+        if (ed.contains(r.commonAncestorContainer)) savedRange.current = r.cloneRange();
+      }
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, []);
 
   const viewportCentre = () => {
     const s = scrollRef.current;
@@ -218,7 +240,22 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
   return (
     <div className="flex flex-1 overflow-hidden">
       {isNoteSelected ? (
-        <NoteSubRail el={selected} editing={editingId === selected.id} deleteRef={deleteRef} deleteActive={overDelete} onDone={deselect} onExec={exec} onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)} onDelete={() => selectedId && remove(selectedId)} />
+        <NoteSubRail
+          el={selected}
+          editing={editingId === selected.id}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onExec={exec}
+          onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)}
+          onStrip={(hex) => {
+            const style = { ...selected.style };
+            if (hex) style.strip = hex;
+            else delete style.strip;
+            patch(selected.id, { style } as Partial<Element>);
+          }}
+          onDelete={() => selectedId && remove(selectedId)}
+        />
       ) : (
         <ToolRail tools={createTools} deleteRef={deleteRef} deleteActive={overDelete} onDelete={selectedId ? () => remove(selectedId) : undefined} />
       )}
@@ -340,6 +377,7 @@ function ElementCard({
 
   return (
     <div
+      data-selected-element={selected ? "true" : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -363,7 +401,12 @@ function ElementCard({
       }}
     >
       {isText ? (
-        <EditableNote id={el.id} html={el.type === "note" || el.type === "text" ? el.text : ""} editing={editing} style={textStyle} onText={onText} onRegister={onRegister} />
+        <div className="flex h-full w-full flex-col overflow-hidden">
+          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+          <div className="min-h-0 flex-1">
+            <EditableNote id={el.id} html={el.type === "note" || el.type === "text" ? el.text : ""} editing={editing} style={textStyle} onText={onText} onRegister={onRegister} />
+          </div>
+        </div>
       ) : el.type === "image" ? (
         imgUrl ? (
           <img src={imgUrl} alt={el.alt ?? ""} className="h-full w-full rounded object-contain" draggable={false} />

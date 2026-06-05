@@ -40,6 +40,7 @@ function styleAttr(e: Element): string {
     s.fontWeight ? `font-weight:${s.fontWeight}` : "",
     s.color ? `color:${s.color}` : "",
     s.align ? `text-align:${s.align}` : "",
+    s.strip ? `border-top:6px solid ${s.strip}` : "",
   ].filter(Boolean);
   return decls.join(";");
 }
@@ -55,11 +56,11 @@ function renderElement(e: Element): string {
     case "image":
       // Media is not inlined yet (would require fetching derivatives server-side); render a
       // labelled placeholder. External URLs are never fetched here — avoids SSRF + sidecar egress.
-      return `<div style="${base};border:1px dashed #999;display:flex;align-items:center;justify-content:center;color:#666">${esc(e.alt ?? "image")}</div>`;
+      return `<div style="${base};border:2px dashed #999;display:flex;align-items:center;justify-content:center;color:#666">${esc(e.alt ?? "image")}</div>`;
     case "file":
-      return `<div style="${base};border:1px solid #ccc;padding:6px">${esc(e.name)}</div>`;
+      return `<div style="${base};border:2px solid #ccc;padding:6px">${esc(e.name)}</div>`;
     case "embed":
-      return `<div style="${base};border:1px dashed #999"></div>`;
+      return `<div style="${base};border:2px dashed #999"></div>`;
   }
 }
 
