@@ -56,13 +56,13 @@ export function NoteSubRail({
           <div ref={styleRef} className="flex w-full justify-center">
             <RailBtn label="Text style" active={styleOpen} icon={<span className="font-serif text-base font-bold leading-none">T<span className="text-[0.7em]">t</span></span>} onClick={() => setStyleOpen((o) => !o)} />
           </div>
-          <RailBtn label="Bold" shortcut="⌘B" active={on("bold")} icon={<span className="font-black">B</span>} onClick={() => onExec("bold")} />
-          <RailBtn label="Italic" shortcut="⌘I" active={on("italic")} icon={<span className="font-serif italic">I</span>} onClick={() => onExec("italic")} />
-          <RailBtn label="Strikethrough" active={on("strikeThrough")} icon={<span className="font-bold line-through">S</span>} onClick={() => onExec("strikeThrough")} />
-          <RailBtn label="Underline" shortcut="⌘U" active={on("underline")} icon={<span className="font-bold underline">U</span>} onClick={() => onExec("underline")} />
-          <RailBtn label="Bulleted list" active={on("insertUnorderedList")} icon={<Icon.BulletListIcon />} onClick={() => onExec("insertUnorderedList")} />
-          <RailBtn label="Numbered list" active={on("insertOrderedList")} icon={<Icon.NumberListIcon />} onClick={() => onExec("insertOrderedList")} />
-          <RailBtn label="Align" icon={<Icon.AlignIcon />} onClick={() => onExec(on("justifyCenter") ? "justifyRight" : on("justifyRight") ? "justifyLeft" : "justifyCenter")} />
+          <RailBtn hideCaption label="Bold" shortcut="⌘B" active={on("bold")} icon={<span className="font-black">B</span>} onClick={() => onExec("bold")} />
+          <RailBtn hideCaption label="Italic" shortcut="⌘I" active={on("italic")} icon={<span className="font-serif italic">I</span>} onClick={() => onExec("italic")} />
+          <RailBtn hideCaption label="Strikethrough" active={on("strikeThrough")} icon={<span className="font-bold line-through">S</span>} onClick={() => onExec("strikeThrough")} />
+          <RailBtn hideCaption label="Underline" shortcut="⌘U" active={on("underline")} icon={<span className="font-bold underline">U</span>} onClick={() => onExec("underline")} />
+          <RailBtn hideCaption label="Bulleted list" active={on("insertUnorderedList")} icon={<Icon.BulletListIcon />} onClick={() => onExec("insertUnorderedList")} />
+          <RailBtn hideCaption label="Numbered list" active={on("insertOrderedList")} icon={<Icon.NumberListIcon />} onClick={() => onExec("insertOrderedList")} />
+          <RailBtn hideCaption label="Align" icon={<Icon.AlignIcon />} onClick={() => onExec(on("justifyCenter") ? "justifyRight" : on("justifyRight") ? "justifyLeft" : "justifyCenter")} />
         </>
       ) : (
         <div ref={colorRef} className="flex w-full justify-center">
@@ -98,11 +98,13 @@ export function NoteSubRail({
   );
 }
 
-const RailBtn = ({ label, shortcut, icon, active, onClick }: { label: string; shortcut?: string; icon: ReactNode; active?: boolean; onClick: () => void }) => (
+// `label` is always used for the hover tooltip; the visible caption under the icon is optional
+// (omitted for standard inline text tools like Bold/Italic, shown for Done/Text style/Color/Delete).
+const RailBtn = ({ label, shortcut, icon, active, hideCaption, onClick }: { label: string; shortcut?: string; icon: ReactNode; active?: boolean; hideCaption?: boolean; onClick: () => void }) => (
   <Tooltip label={label} shortcut={shortcut}>
     <button onMouseDown={(e) => e.preventDefault()} onClick={onClick} className="group flex w-full flex-col items-center gap-1 py-1.5">
       <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg transition-colors ${active ? "bg-primary text-white" : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-700"}`}>{icon}</span>
-      <span className="text-[10px] font-bold text-slate-400">{label}</span>
+      {!hideCaption && <span className="text-[10px] font-bold text-slate-400">{label}</span>}
     </button>
   </Tooltip>
 );
