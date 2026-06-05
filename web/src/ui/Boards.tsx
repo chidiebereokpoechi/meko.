@@ -1,94 +1,82 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
-import type { Board, Workspace } from "../types.ts";
+import type { Board } from "../types.ts";
+import { Icon, toast } from "./kit/index.ts";
+import { NameModal } from "./NameModal.tsx";
 
-type WorkspaceWithRole = Workspace & { role: string };
+// Palette for board tiles, picked deterministically from the board id (Milanote-style).
+const PALETTE = ["#d9c27e", "#d97e9b", "#7e9bd9", "#86c08a", "#c0867e", "#9b86c0", "#7ec0b8"];
+const tileColor = (id: string) => PALETTE[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length]!;
 
-export function Boards({ onOpen }: { onOpen: (b: Board) => void }) {
-  const [workspaces, setWorkspaces] = useState<WorkspaceWithRole[]>([]);
-  const [activeWs, setActiveWs] = useState<string | null>(null);
+export function Boards({ activeWs, role, onOpen }: { activeWs: string | null; role: string | null; onOpen: (b: Board) => void }) {
   const [boards, setBoards] = useState<Board[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const loadWorkspaces = async () => {
-    const ws = await api<WorkspaceWithRole[]>("/api/workspaces");
-    setWorkspaces(ws);
-    if (ws.length && !activeWs) setActiveWs(ws[0]!.id);
-    setLoading(false);
-  };
+  const [creating, setCreating] = useState(false);
+  const canEdit = role === "owner" || role === "admin" || role === "editor";
 
   useEffect(() => {
-    loadWorkspaces();
-  }, []);
-
-  useEffect(() => {
-    if (!activeWs) return;
-    api<{ data: Board[] }>(`/api/workspaces/${activeWs}/boards`).then((r) => setBoards(r.data));
+    if (!activeWs) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    api<{ data: Board[] }>(`/api/workspaces/${activeWs}/boards`)
+      .then((r) => setBoards(r.data))
+      .finally(() => setLoading(false));
   }, [activeWs]);
 
-  const createWorkspace = async () => {
-    const name = prompt("Workspace name")?.trim();
-    if (!name) return;
-    const ws = await api<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) });
-    await loadWorkspaces();
-    setActiveWs(ws.id);
-  };
-
-  const createBoard = async () => {
-    if (!activeWs) return;
-    const title = prompt("Board title")?.trim() || "Untitled";
-    const b = await api<Board>(`/api/workspaces/${activeWs}/boards`, { method: "POST", body: JSON.stringify({ title }) });
-    onOpen(b);
-  };
-
-  if (loading) return <div className="grid flex-1 place-items-center text-slate-400">Loading…</div>;
+  if (!activeWs) return <Empty>Create a workspace to get started.</Empty>;
+  if (loading) return <Empty>Loading…</Empty>;
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Workspace rail */}
-      <aside className="flex w-56 flex-col gap-1 border-r-2 border-slate-100 bg-white p-3">
-        <div className="px-2 pb-2 font-bold uppercase tracking-wide text-slate-400">Workspaces</div>
-        {workspaces.map((w) => (
-          <button
-            key={w.id}
-            onClick={() => setActiveWs(w.id)}
-            className={`rounded-lg px-3 py-2 text-left font-bold ${
-              w.id === activeWs ? "bg-primary/10 text-primary-dark" : "text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            {w.name}
-          </button>
+    <main className="flex-1 overflow-auto p-10">
+      <div className="flex flex-wrap gap-x-6 gap-y-8">
+        {boards.map((b) => (
+          <Tile key={b.id} board={b} viewOnly={!canEdit} onOpen={() => onOpen(b)} />
         ))}
-        <button className="link mt-1 px-3 text-left" onClick={createWorkspace}>
-          + New workspace
-        </button>
-      </aside>
-
-      {/* Boards grid */}
-      <main className="flex-1 overflow-auto p-6">
-        {!activeWs ? (
-          <div className="text-slate-400">Create a workspace to get started.</div>
-        ) : (
-          <>
-            <div className="mb-4 flex items-center">
-              <h2 className="heading text-base">Boards</h2>
-              <span className="flex-1" />
-              <button className="btn" onClick={createBoard}>
-                + New board
-              </button>
-            </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-              {boards.map((b) => (
-                <button key={b.id} className="card flex h-32 flex-col justify-end p-4 text-left hover:shadow-xl" onClick={() => onOpen(b)}>
-                  <div className="heading text-sm">{b.title}</div>
-                  <div className="text-slate-400">{new Date(b.updatedAt).toLocaleDateString()}</div>
-                </button>
-              ))}
-              {!boards.length && <div className="text-slate-400">No boards yet.</div>}
-            </div>
-          </>
+        {canEdit && (
+          <button onClick={() => setCreating(true)} className="flex w-28 flex-col items-center gap-2 text-slate-400 hover:text-primary">
+            <span className="grid h-24 w-24 place-items-center rounded-3xl border-2 border-dashed border-slate-300 text-2xl">
+              <Icon.PlusIcon />
+            </span>
+            <span className="text-xs font-bold">New board</span>
+          </button>
         )}
-      </main>
-    </div>
+        {!boards.length && !canEdit && <Empty>No boards here yet.</Empty>}
+      </div>
+
+      <NameModal
+        open={creating}
+        title="New board"
+        label="Board title"
+        onClose={() => setCreating(false)}
+        onSubmit={async (title) => {
+          const b = await api<Board>(`/api/workspaces/${activeWs}/boards`, { method: "POST", body: JSON.stringify({ title }) });
+          toast("Board created", "success");
+          onOpen(b);
+        }}
+      />
+    </main>
   );
+}
+
+function Tile({ board, viewOnly, onOpen }: { board: Board; viewOnly: boolean; onOpen: () => void }) {
+  return (
+    <button onClick={onOpen} className="flex w-28 flex-col items-center gap-2 text-center">
+      <span className="relative grid h-24 w-24 place-items-center rounded-3xl shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md" style={{ background: tileColor(board.id) }}>
+        <span className="text-3xl font-bold text-black/30">{board.title.slice(0, 1).toUpperCase()}</span>
+        {viewOnly && (
+          <span className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-white text-slate-500 shadow">
+            <Icon.EyeIcon className="text-sm" />
+          </span>
+        )}
+      </span>
+      <span className="font-bold text-slate-700">{board.title}</span>
+      <span className="text-xs text-slate-400">{new Date(board.updatedAt).toLocaleDateString()}</span>
+    </button>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="grid flex-1 place-items-center text-slate-400">{children}</div>;
 }
