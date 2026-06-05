@@ -33,7 +33,15 @@ const Base = {
 export const NoteElement = z.object({ ...Base, type: z.literal("note"), text: z.string().max(10_000) }).strict();
 export const TextElement = z.object({ ...Base, type: z.literal("text"), text: z.string().max(50_000) }).strict();
 export const ImageElement = z
-  .object({ ...Base, type: z.literal("image"), src: SafeUrl, alt: z.string().max(1_000).optional() })
+  .object({
+    ...Base,
+    type: z.literal("image"),
+    src: SafeUrl,
+    alt: z.string().max(1_000).optional(),
+    // Durable reference to the uploaded media; src is a presigned URL that expires, so clients
+    // re-resolve via GET /api/media/:mediaId on load. Optional for externally-sourced images.
+    mediaId: z.string().uuid().optional(),
+  })
   .strict();
 export const LinkElement = z
   .object({ ...Base, type: z.literal("link"), url: SafeUrl, title: z.string().max(500).optional() })

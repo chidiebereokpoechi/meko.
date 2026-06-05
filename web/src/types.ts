@@ -23,7 +23,7 @@ interface Base {
 export type Element =
   | (Base & { type: "note"; text: string })
   | (Base & { type: "text"; text: string })
-  | (Base & { type: "image"; src: string; alt?: string })
+  | (Base & { type: "image"; src: string; alt?: string; mediaId?: string })
   | (Base & { type: "link"; url: string; title?: string })
   | (Base & { type: "file"; name: string; downloadUrl: string; size: number })
   | (Base & { type: "embed"; src: string });
