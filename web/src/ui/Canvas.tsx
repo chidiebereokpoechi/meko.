@@ -2,10 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { BoardConnection, type ConnStatus } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
+import { unfurlLink } from "../lib/links.ts";
 import type { Element } from "../types.ts";
 import { Badge, Icon, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
+import { LinkSubRail } from "./LinkSubRail.tsx";
+import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
 
 export interface BoardControls {
@@ -33,6 +36,7 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overDelete, setOverDelete] = useState(false);
+  const [linkModal, setLinkModal] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -187,6 +191,32 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
     fileRef.current?.click();
   };
 
+  // Open the link dialog at a drop point; createLink unfurls then drops the preview card.
+  const createLink = async (url: string) => {
+    const c = connRef.current;
+    const at = linkModal ?? viewportCentre();
+    if (!c) return;
+    try {
+      const u = await unfurlLink(boardId, url);
+      const id = crypto.randomUUID();
+      c.elements.set(id, {
+        id,
+        type: "link",
+        x: at.x,
+        y: at.y,
+        w: 260,
+        h: u.imageUrl ? 230 : 96,
+        url: u.url || url,
+        title: u.title ?? undefined,
+        description: u.description ?? undefined,
+        image: u.imageUrl ?? undefined,
+      });
+      setSelectedId(id);
+    } catch {
+      toast("Couldn't load that link", "error");
+    }
+  };
+
   const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -228,14 +258,25 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
     const y = rect ? e.clientY - rect.top : 200;
     if (tool === "note") createNote(x, y);
     else if (tool === "image") pickImageAt(x, y);
+    else if (tool === "link") setLinkModal({ x, y });
   };
 
   const createTools: Tool[] = [
     { key: "note", label: "Note", icon: <Icon.NoteIcon />, dragKey: "note", onPlace: () => createNote(viewportCentre().x, viewportCentre().y) },
     { key: "image", label: "Image", icon: <Icon.ImageIcon />, dragKey: "image", onPlace: () => pickImageAt(viewportCentre().x, viewportCentre().y), disabled: busy },
+    { key: "link", label: "Link", icon: <Icon.LinkIcon />, dragKey: "link", onPlace: () => setLinkModal(viewportCentre()) },
   ];
 
   const isNoteSelected = selected && (selected.type === "note" || selected.type === "text");
+  const isLinkSelected = selected && selected.type === "link";
+  // Merge a hex into the selected element's style, or delete the key when null.
+  const setStyleKey = (key: "fill" | "strip", hex: string | null) => {
+    if (!selected) return;
+    const style = { ...selected.style };
+    if (hex) style[key] = hex;
+    else delete style[key];
+    patch(selected.id, { style } as Partial<Element>);
+  };
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -247,19 +288,25 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
           deleteActive={overDelete}
           onDone={deselect}
           onExec={exec}
-          onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)}
-          onStrip={(hex) => {
-            const style = { ...selected.style };
-            if (hex) style.strip = hex;
-            else delete style.strip;
-            patch(selected.id, { style } as Partial<Element>);
-          }}
+          onFill={(hex) => setStyleKey("fill", hex)}
+          onStrip={(hex) => setStyleKey("strip", hex)}
+          onDelete={() => selectedId && remove(selectedId)}
+        />
+      ) : isLinkSelected ? (
+        <LinkSubRail
+          el={selected}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onPatch={(p) => patch(selected.id, p as Partial<Element>)}
+          onStrip={(hex) => setStyleKey("strip", hex)}
           onDelete={() => selectedId && remove(selectedId)}
         />
       ) : (
         <ToolRail tools={createTools} deleteRef={deleteRef} deleteActive={overDelete} onDelete={selectedId ? () => remove(selectedId) : undefined} />
       )}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickImage} />
+      <NameModal open={!!linkModal} title="Add a link" label="Paste a URL" submitLabel="Add" onClose={() => setLinkModal(null)} onSubmit={createLink} />
 
       <div className="relative flex-1 overflow-hidden">
         <div className="absolute right-4 top-4 z-10">
@@ -280,6 +327,7 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
                 onResize={(w, h) => patch(el.id, { w, h })}
                 onText={(text) => patch(el.id, { text } as Partial<Element>)}
                 onRegister={(e) => (editorRef.current = e)}
+                onOpen={el.type === "link" ? () => window.open(el.url, "_blank", "noopener,noreferrer") : undefined}
                 shrink={draggingId === el.id && overDelete}
                 onDragMove={(x, y) => handleDragMove(el.id, x, y)}
                 onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
@@ -290,6 +338,14 @@ export function Canvas({ boardId, onControls }: { boardId: string; onControls: (
       </div>
     </div>
   );
+}
+
+function linkHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 function ElementCard({
@@ -303,6 +359,7 @@ function ElementCard({
   onResize,
   onText,
   onRegister,
+  onOpen,
   shrink,
   onDragMove,
   onDragRelease,
@@ -317,6 +374,7 @@ function ElementCard({
   onResize: (w: number, h: number) => void;
   onText: (t: string) => void;
   onRegister: (e: ActiveEditor | null) => void;
+  onOpen?: () => void;
   shrink: boolean;
   onDragMove: (x: number, y: number) => void;
   onDragRelease: (x: number, y: number) => void;
@@ -355,8 +413,17 @@ function ElementCard({
     setDrag(null);
   };
   // First click selects; a second click (already selected, no drag) enters edit mode.
-  const onClick = () => {
+  // Modifier-click (⌘/Ctrl/Alt) opens link elements.
+  const onClick = (e: React.MouseEvent) => {
+    if ((e.metaKey || e.ctrlKey || e.altKey) && onOpen) {
+      onOpen();
+      return;
+    }
     if (isText && !justSelected.current && !editing && !dragged.current) onEdit();
+  };
+  // Non-text elements (e.g. links) open on double-click.
+  const onDoubleClick = () => {
+    if (!isText && !dragged.current) onOpen?.();
   };
 
   const startResize = (e: React.PointerEvent) => {
@@ -365,9 +432,12 @@ function ElementCard({
     size.current = { x: e.clientX, y: e.clientY, w: el.w, h: el.h };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
+  // Links are content-height (toggling preview/caption resizes the card), so resize is width-only.
+  const autoSize = el.type === "link";
   const onResizeMove = (e: React.PointerEvent) => {
     if (!size.current) return;
-    onResize(Math.max(120, Math.round(size.current.w + e.clientX - size.current.x)), Math.max(60, Math.round(size.current.h + e.clientY - size.current.y)));
+    const w = Math.max(120, Math.round(size.current.w + e.clientX - size.current.x));
+    onResize(w, autoSize ? el.h : Math.max(60, Math.round(size.current.h + e.clientY - size.current.y)));
   };
   const endResize = () => (size.current = null);
 
@@ -382,6 +452,7 @@ function ElementCard({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
       className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${drag ? "opacity-80 shadow-xl" : ""}`}
@@ -392,7 +463,7 @@ function ElementCard({
         left: drag ? drag.x - drag.ox : el.x,
         top: drag ? drag.y - drag.oy : el.y,
         width: el.w,
-        height: el.h,
+        height: autoSize ? "auto" : el.h,
         background: isText ? s.fill ?? "#ffffff" : "#fff",
         zIndex: drag ? 2000 : undefined,
         transform: shrink ? "scale(0.4)" : undefined,
@@ -413,11 +484,24 @@ function ElementCard({
         ) : (
           <div className="grid h-full place-items-center text-slate-400">image…</div>
         )
+      ) : el.type === "link" ? (
+        <div className="flex w-full flex-col overflow-hidden" style={{ background: el.style?.fill ?? "#ffffff" }}>
+          {el.style?.strip && <div className="h-2.5 w-full shrink-0" style={{ background: el.style.strip }} />}
+          {el.image && !el.hideImage && <img src={el.image} alt="" className="w-full object-cover" style={{ height: Math.round(el.w * 0.52) }} draggable={false} />}
+          <div className="shrink-0 p-2">
+            {/* Heading is a real link; stopPropagation so clicking it opens (not drag/select). */}
+            <a href={el.url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()} className="block truncate text-xs font-bold text-primary hover:underline">
+              {el.title || el.url}
+            </a>
+            {el.description && !el.hideCaption && <div className="mt-1 line-clamp-2 text-[11px] text-slate-500">{el.description}</div>}
+            <div className="mt-1 truncate text-[10px] text-slate-400">{linkHost(el.url)}</div>
+          </div>
+        </div>
       ) : (
         <div className="grid h-full place-items-center text-slate-400">{el.type}</div>
       )}
 
-      <div onPointerDown={startResize} onPointerMove={onResizeMove} onPointerUp={endResize} className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />
+      <div onPointerDown={startResize} onPointerMove={onResizeMove} onPointerUp={endResize} className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize" style={{ background: `linear-gradient(135deg, transparent 50%, ${selected ? "#6e24ff" : "#cbd5e1"} 50%)` }} />
     </div>
   );
 }

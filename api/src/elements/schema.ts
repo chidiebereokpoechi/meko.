@@ -48,7 +48,18 @@ export const ImageElement = z
   })
   .strict();
 export const LinkElement = z
-  .object({ ...Base, type: z.literal("link"), url: SafeUrl, title: z.string().max(500).optional() })
+  .object({
+    ...Base,
+    type: z.literal("link"),
+    url: SafeUrl,
+    title: z.string().max(500).optional(),
+    description: z.string().max(2000).optional(),
+    // Unfurl preview image (remote OG image URL); http(s)-only.
+    image: SafeUrl.optional(),
+    // Per-card toggles (absent = shown).
+    hideImage: z.boolean().optional(),
+    hideCaption: z.boolean().optional(),
+  })
   .strict();
 export const FileElement = z
   .object({ ...Base, type: z.literal("file"), name: z.string().max(500), downloadUrl: SafeUrl, size: z.number().int().min(0) })

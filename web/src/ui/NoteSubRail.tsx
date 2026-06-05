@@ -217,7 +217,7 @@ export function NoteSubRail({
 
 // `label` is always used for the hover tooltip; the visible caption under the icon is optional
 // (omitted for standard inline text tools like Bold/Italic, shown for Done/Text style/Color/Delete).
-const RailBtn = ({
+export const RailBtn = ({
   label,
   shortcut,
   icon,
@@ -254,7 +254,7 @@ const RailBtn = ({
 
 // Popover panel anchored beside the rail (slate-50, 2px border). Closes via the tool toggle or
 // deselecting the note — no explicit close button.
-function Popover({ top, children }: { top: number; children: ReactNode }) {
+export function Popover({ top, children }: { top: number; children: ReactNode }) {
   return (
     <div
       data-note-pane
@@ -381,7 +381,7 @@ const TabBtn = ({ active, onClick, children }: { active: boolean; onClick: () =>
 );
 
 // Background / Top-strip tabbed picker (note selected, not editing).
-function ColorTabs({ fill, strip, onFill, onStrip }: { fill?: string; strip?: string; onFill: (c: string) => void; onStrip: (c: string | null) => void }) {
+export function ColorTabs({ fill, strip, onFill, onStrip }: { fill?: string; strip?: string; onFill: (c: string) => void; onStrip: (c: string | null) => void }) {
   const [tab, setTab] = useState<"bg" | "strip">("bg");
   return (
     <>
@@ -396,7 +396,7 @@ function ColorTabs({ fill, strip, onFill, onStrip }: { fill?: string; strip?: st
 
 // Top-strip swatches: a "none" card (diagonal slash) + the note palette as little cards with a
 // coloured strip, plus a custom-colour toggle. Mirrors the Milanote top-strip picker.
-function StripPicker({ value, onChange }: { value?: string; onChange: (c: string | null) => void }) {
+export function StripPicker({ value, onChange }: { value?: string; onChange: (c: string | null) => void }) {
   const [custom, setCustom] = useState(false);
   if (custom) {
     return (
