@@ -151,6 +151,22 @@ export const jobs = pgTable("jobs", {
   index("jobs_reaper_idx").on(t.claimExpiresAt).where(sql`status = 'running'`),
 ]);
 
+// --- Exports (§8) ---
+
+export const exportFormatEnum = pgEnum("export_format", ["png", "pdf"]);
+export const exportStatusEnum = pgEnum("export_status", ["pending", "running", "ready", "failed"]);
+
+export const boardExports = pgTable("exports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boardId: uuid("board_id").notNull().references(() => boards.id, { onDelete: "cascade" }),
+  requestedBy: uuid("requested_by").notNull().references(() => users.id),
+  format: exportFormatEnum("format").notNull(),
+  status: exportStatusEnum("status").notNull().default("pending"),
+  resultKey: text("result_key"),
+  error: text("error"),
+  createdAt: now(),
+}, (t) => [index("exports_board_idx").on(t.boardId, t.createdAt.desc())]);
+
 // --- Idempotency & audit ---
 
 export const idempotencyKeys = pgTable("idempotency_keys", {

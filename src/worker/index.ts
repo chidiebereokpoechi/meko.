@@ -38,7 +38,8 @@ async function workLoop(): Promise<void> {
   while (running) {
     let job: Job | null = null;
     try {
-      job = await claimJob();
+      // Export rendering is handled by the isolated Chromium sidecar, not here (§8b).
+      job = await claimJob({ notType: "export" });
     } catch (err) {
       log.error({ err, action: "job.claim_fail" }, "claim failed");
       await sleep(1000);

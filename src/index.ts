@@ -15,6 +15,7 @@ import { boardRoutes } from "@/http/routes/boards.ts";
 import { mediaRoutes } from "@/http/routes/media.ts";
 import { linkRoutes } from "@/http/routes/links.ts";
 import { shareRoutes } from "@/http/routes/sharing.ts";
+import { exportRoutes } from "@/http/routes/exports.ts";
 import { internalRoutes } from "@/http/routes/internal.ts";
 import { SsrfError } from "@/lib/ssrf.ts";
 import { redeemWsTicket } from "@/auth/ws-ticket.ts";
@@ -83,6 +84,7 @@ const app = new Elysia()
   .use(mediaRoutes)
   .use(linkRoutes)
   .use(shareRoutes)
+  .use(exportRoutes)
   .use(internalRoutes)
   // WebSocket board endpoint. Origin is validated at the upgrade; auth is by ticket message.
   .ws("/boards/:boardId", {

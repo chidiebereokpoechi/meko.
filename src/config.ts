@@ -50,6 +50,12 @@ const Env = z.object({
   // Shared secret gating internal-only ops endpoints (dead-letter inspection). Empty ⇒ endpoints
   // return 404, hiding their existence.
   MEKO_INTERNAL_TOKEN: z.string().default(""),
+
+  // Export sidecar (§8b). API base the sidecar reaches for the render endpoint, the Chromium
+  // binary path inside the sidecar image, and the only host Chromium is allowed to contact.
+  MEKO_API_INTERNAL_URL: z.string().default("http://app:3000"),
+  CHROMIUM_PATH: z.string().default("/usr/bin/chromium-browser"),
+  EXPORT_ALLOWED_HOST: z.string().default("app"),
 });
 
 const parsed = Env.safeParse(process.env);

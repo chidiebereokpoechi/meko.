@@ -13,7 +13,15 @@ export interface Job {
 
 // Claim one job atomically with FOR UPDATE SKIP LOCKED (§12o). Workers skip rows another worker
 // already locked instead of serialising behind them. Single UPDATE avoids the SELECT+UPDATE race.
-export async function claimJob(): Promise<Job | null> {
+//
+// `match` partitions work across worker pools: the general worker excludes 'export', while the
+// network-isolated Chromium sidecar claims only 'export' (§8b).
+export async function claimJob(match?: { type?: string; notType?: string }): Promise<Job | null> {
+  const typeFilter = match?.type
+    ? sql`AND type = ${match.type}`
+    : match?.notType
+      ? sql`AND type <> ${match.notType}`
+      : sql``;
   const res = await db.execute<{
     id: string;
     type: string;
@@ -29,7 +37,7 @@ export async function claimJob(): Promise<Job | null> {
         updated_at = now()
     WHERE id = (
       SELECT id FROM jobs
-      WHERE status = 'pending' AND run_after <= now()
+      WHERE status = 'pending' AND run_after <= now() ${typeFilter}
       ORDER BY priority DESC, run_after
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -71,4 +79,14 @@ export async function failJob(job: Job, err: unknown): Promise<void> {
 
 export async function enqueue(type: string, payload: unknown, priority = 0): Promise<void> {
   await db.insert(jobs).values({ type, payload: payload as object, priority });
+}
+
+// Fail a job by id (used by the export sidecar, which never holds the Job object itself).
+export async function failJobById(jobId: string, err: unknown): Promise<void> {
+  const [row] = await db
+    .select({ id: jobs.id, type: jobs.type, payload: jobs.payload, attempts: jobs.attempts, maxAttempts: jobs.maxAttempts })
+    .from(jobs)
+    .where(eq(jobs.id, jobId))
+    .limit(1);
+  if (row) await failJob(row, err);
 }

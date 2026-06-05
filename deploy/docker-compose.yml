@@ -1,7 +1,8 @@
 # Meko deployment topology. App + worker connect through PgBouncer (DATABASE_URL); the migrator
 # uses POSTGRES_DIRECT_URL → db:5432, bypassing PgBouncer (§3d). Redis carries the multi-node
 # Yjs bus + WS tickets + rate-limit store (§3e). nginx terminates TLS (§11b). pg-backup runs
-# daily pg_dump (§11c). export-sidecar is network-isolated (§8b) — added in Phase 7.
+# daily pg_dump (§11c). export-sidecar runs Chromium on an isolated network reaching only the
+# app — never db/redis (§8b).
 
 x-app-env: &app-env
   NODE_ENV: production
@@ -11,6 +12,7 @@ x-app-env: &app-env
   MEKO_ALLOWED_ORIGINS: ${MEKO_ALLOWED_ORIGINS:-https://meko.example.com}
   MEKO_BASE_URL: ${MEKO_BASE_URL:-https://meko.example.com}
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+  MEKO_INTERNAL_TOKEN: ${MEKO_INTERNAL_TOKEN:?set MEKO_INTERNAL_TOKEN}
 
 services:
   db:
@@ -21,6 +23,7 @@ services:
       POSTGRES_DB: meko
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U meko"]
       interval: 5s
@@ -39,6 +42,7 @@ services:
       MAX_CLIENT_CONN: "1000"
       DEFAULT_POOL_SIZE: "25"
       AUTH_TYPE: scram-sha-256    # match postgres 16 default
+    networks: [backend]
     depends_on:
       db:
         condition: service_healthy
@@ -47,11 +51,13 @@ services:
     image: redis:7-alpine
     # Pub/sub + ephemeral WS tickets + rate-limit counters — persistence unnecessary (§16).
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [backend]
 
   migrate:
     build: { context: .., dockerfile: Dockerfile }
     command: ["bun", "run", "src/db/migrate.ts"]
     environment: *app-env
+    networks: [backend]
     depends_on:
       db:
         condition: service_healthy
@@ -62,6 +68,8 @@ services:
     environment:
       <<: *app-env
       NODE_ID: app-1
+    # On both networks: backend for db/redis, export-internal so the sidecar can reach it.
+    networks: [backend, export-internal]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -80,10 +88,26 @@ services:
     environment:
       <<: *app-env
       NODE_ID: worker-1
+    networks: [backend]
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
+        condition: service_started
+
+  # Chromium export renderer (§8b). Isolated: only on export-internal, so it can reach the app but
+  # NOT db or redis. Runs as non-root (see Dockerfile); Chromium is host-locked via --host-rules.
+  export-sidecar:
+    build: { context: .., dockerfile: deploy/export-sidecar.Dockerfile }
+    environment:
+      <<: *app-env
+      NODE_ID: export-1
+      MEKO_API_INTERNAL_URL: http://app:3000
+      EXPORT_ALLOWED_HOST: app
+      CHROMIUM_PATH: /usr/bin/chromium-browser
+    networks: [export-internal]
+    depends_on:
+      app:
         condition: service_started
 
   nginx:
@@ -94,6 +118,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    networks: [backend]
     depends_on: [app]
 
   pg-backup:
@@ -107,9 +132,14 @@ services:
       done"
     volumes:
       - ./backups:/backups
+    networks: [backend]
     depends_on:
       db:
         condition: service_healthy
+
+networks:
+  backend:
+  export-internal:
 
 volumes:
   pgdata:

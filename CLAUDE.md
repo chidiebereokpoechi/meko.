@@ -156,6 +156,16 @@ Building per v4 §15.
   (`GET /api/internal/jobs/dead`, gated by `MEKO_INTERNAL_TOKEN`, 404 when unset, §12n). Hourly
   `cleanup` worker job prunes expired idempotency keys, refresh tokens, invites, share links.
 
-Later phases (exports, polish) are tracked in the plan and not yet built.
+- **Phase 7 (exports) — done.** `exports` table + `POST /api/boards/:id/exports` (view + 5/hr).
+  Render pipeline is split for isolation (§8b): the API builds self-contained, HTML-escaped board
+  markup (`src/export/html.ts`) behind internal-token routes (`export-claim` → `export-render` →
+  `export-result`); the Chromium sidecar (`src/export/worker.ts` + `chromium.ts`, puppeteer-core)
+  talks ONLY to the API — no DB/Redis/S3 client — runs non-root on an isolated compose network,
+  and Chromium is host-locked via `--host-rules`. Generic worker excludes `export` jobs; the
+  sidecar claims only those. nginx 404s `/api/internal/`. **Gotcha:** never name a Drizzle table
+  symbol `exports` — it collides with the CJS `exports` global and breaks `drizzle-kit generate`;
+  the symbol is `boardExports` (table name stays `exports`).
+
+Later phase (polish) tracked in the plan and not yet built.
 When you implement a phase item, check it against the invariant it maps to above. Authenticated
 API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.

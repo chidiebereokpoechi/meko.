@@ -36,6 +36,13 @@
       "when": 1780641122701,
       "tag": "0004_true_jackal",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780641788144,
+      "tag": "0005_clear_carnage",
+      "breakpoints": true
     }
   ]
 }
