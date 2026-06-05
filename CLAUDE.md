@@ -90,6 +90,14 @@ These are the load-bearing correctness/security rules from v4. Do not regress th
    `Access-Control-Allow-Origin: *` with credentials. (§12j/12k/12l)
 10. **Global request timeout** so a slow query can't pin a DB connection and exhaust the pool. (§12p)
 
+## Working agreement
+
+- **Don't commit a fix until the user verifies it.** When asked to fix something, make the
+  change, say it's ready to test, and wait for confirmation before committing. (Feature work may
+  be committed normally unless told otherwise.)
+- The app name is exactly **"meko."** — lowercase, trailing period.
+- Frontend follows [web/DESIGN.md](web/DESIGN.md).
+
 ## Conventions
 
 - Read config from `src/config.ts` only; never `process.env` elsewhere.

@@ -3,8 +3,8 @@
 // backstop). Allowlist tags + a tiny set of style properties; everything else is unwrapped or
 // dropped. Inline event handlers, scripts, javascript: hrefs, url()/expression() styles never pass.
 
-const ALLOWED = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "UL", "OL", "LI", "BR", "DIV", "P", "SPAN", "A", "FONT"]);
-const STYLE_PROPS = new Set(["color", "font-weight", "font-style", "text-decoration", "text-align"]);
+const ALLOWED = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "UL", "OL", "LI", "BR", "DIV", "P", "SPAN", "A", "FONT", "H1", "H2", "H3", "PRE", "CODE", "BLOCKQUOTE", "MARK"]);
+const STYLE_PROPS = new Set(["color", "background-color", "font-weight", "font-style", "text-decoration", "text-align"]);
 const SAFE_VALUE = /^[#0-9a-z(),.\s%-]+$/i; // hex / rgb() / keywords; no url(, no ;, no expression
 
 function filterStyle(style: string): string {

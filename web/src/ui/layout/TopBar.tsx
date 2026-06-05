@@ -33,7 +33,7 @@ export function TopBar({
           {active?.name ?? "meko."}
           <Icon.ChevronDown className="text-base" />
         </MenuButton>
-        <MenuItems className="absolute left-0 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-lg focus:outline-none">
+        <MenuItems className="absolute left-0 mt-1 w-52 rounded-lg border-2 border-slate-100 bg-white p-1 shadow-lg focus:outline-none">
           {workspaces.map((w) => (
             <MenuItem key={w.id}>
               <button onClick={() => onPickWorkspace(w.id)} className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left font-bold text-slate-600 data-[focus]:bg-primary/10 data-[focus]:text-primary-dark">
@@ -42,7 +42,7 @@ export function TopBar({
               </button>
             </MenuItem>
           ))}
-          <div className="my-1 border-t border-slate-100" />
+          <div className="my-1 border-t-2 border-slate-100" />
           <MenuItem>
             <button onClick={onNewWorkspace} className="flex w-full items-center gap-1 rounded-md px-3 py-2 text-left font-bold text-primary data-[focus]:bg-primary/10">
               <Icon.PlusIcon className="text-base" /> New workspace

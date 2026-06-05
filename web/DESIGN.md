@@ -6,14 +6,22 @@ Living doc. Keep the UI coherent by following these. Update it when a rule chang
 
 - The product name is **"meko."** — lowercase, trailing period. Always.
 
+## Source of truth: spenny.io-web
+
+This UI lifts its design + components from `../spenny.io-web`. **Before building any UI element,
+check spenny first** and reuse its library/approach — don't reinvent. Established choices:
+`@headlessui/react` (dialogs, menus, popovers), `react-colorful` `HexColorPicker` (custom color),
+`react-popper` if popper-style positioning is needed. Match spenny's class conventions.
+
 ## Visual tokens (lifted from spenny.io-web)
 
 - **Primary** `#6e24ff`, **primary-dark** `#3600a3`. Text `slate-700`; muted `slate-400/500`.
 - Base font **Manrope**, body `text-xs` (16px root), `tabular-nums`.
 - Radii: controls `rounded-lg`, cards/tiles `rounded-xl`/`rounded-2xl`, modals `rounded-xl`.
 - Shadows: `shadow-lg` on cards/modals/floating UI.
-- Focus: `focus:ring-4 ring-primary/20` on every interactive element (global `*` rule).
-- Borders: 2px (`border-2`), `border-slate-100/200`; inputs sit on `bg-slate-50`.
+- **Borders + dividers are ALWAYS 2px.** Use `border-2` / `border-t-2` / `border-b-2` etc — never
+  the 1px `border` / `border-t`. This includes hairline dividers inside menus and popovers.
+  Colour: `border-slate-100` (dividers/subtle) or `border-slate-200`. Inputs sit on `bg-slate-50`.
 
 ## Layout (lifted from Milanote)
 
