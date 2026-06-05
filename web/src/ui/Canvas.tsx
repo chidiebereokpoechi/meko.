@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
-import { unfurlLink } from "../lib/links.ts";
+import { type Unfurl, unfurlLink } from "../lib/links.ts";
 import type { Element } from "../types.ts";
-import { Badge, Icon, toast } from "./kit/index.ts";
+import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
 import { LinkSubRail } from "./LinkSubRail.tsx";
@@ -17,6 +17,8 @@ import { sanitizeHtml } from "../lib/sanitize.ts";
 
 const WORLD_W = 4000;
 const WORLD_H = 3000;
+// Remembered choice for a dropped URL that could be an image or a link card (localStorage).
+const URL_CHOICE_KEY = "meko.urlDropChoice";
 
 export interface BoardControls {
   undo: () => void;
@@ -66,6 +68,7 @@ export function Canvas({
   const showCommentsRef = useRef(false);
   const [commentSignal, setCommentSignal] = useState(0);
   const [unreadComments, setUnreadComments] = useState(false);
+  const [urlChoice, setUrlChoice] = useState<{ u: Unfurl; url: string; at: { x: number; y: number } } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -398,30 +401,62 @@ export function Canvas({
     fileRef.current?.click();
   };
 
-  // Open the link dialog at a drop point; createLink unfurls then drops the preview card.
-  const createLink = async (url: string, coords?: { x: number; y: number }) => {
+  // Drop a link preview card from an already-fetched unfurl.
+  const dropLink = (u: Unfurl, url: string, at: { x: number; y: number }) => {
     const c = connRef.current;
-    const at = coords ?? linkModal ?? viewportCentre();
     if (!c) return;
+    const id = crypto.randomUUID();
+    c.elements.set(id, {
+      id,
+      type: "link",
+      x: at.x,
+      y: at.y,
+      w: 260,
+      h: u.imageUrl ? 230 : 96,
+      url: u.url || url,
+      title: u.title ?? undefined,
+      description: u.description ?? undefined,
+      image: u.imageUrl ?? undefined,
+    });
+    selectId(id);
+  };
+
+  // Manual "Add link" dialog: always a link card (unfurled).
+  const createLink = async (url: string, coords?: { x: number; y: number }) => {
+    const at = coords ?? linkModal ?? viewportCentre();
     try {
-      const u = await unfurlLink(boardId, url);
-      const id = crypto.randomUUID();
-      c.elements.set(id, {
-        id,
-        type: "link",
-        x: at.x,
-        y: at.y,
-        w: 260,
-        h: u.imageUrl ? 230 : 96,
-        url: u.url || url,
-        title: u.title ?? undefined,
-        description: u.description ?? undefined,
-        image: u.imageUrl ?? undefined,
-      });
-      selectId(id);
+      dropLink(await unfurlLink(boardId, url), url, at);
     } catch {
       toast("Couldn't load that link", "error");
     }
+  };
+
+  // Dropped/pasted URL: an image URL becomes an image; otherwise unfurl, and if the page has a
+  // preview image the result is ambiguous (image vs link) — prompt, honouring a remembered choice.
+  const handleUrl = async (url: string, x: number, y: number) => {
+    if (isImageUrl(url)) return void createImageUrl(url, x, y);
+    const at = { x, y };
+    let u: Unfurl;
+    try {
+      u = await unfurlLink(boardId, url);
+    } catch {
+      toast("Couldn't load that link", "error");
+      return;
+    }
+    if (!u.imageUrl) return dropLink(u, url, at); // nothing to choose between
+    const remembered = localStorage.getItem(URL_CHOICE_KEY);
+    if (remembered === "image") return void createImageUrl(u.imageUrl, at.x, at.y, url);
+    if (remembered === "link") return dropLink(u, url, at);
+    setUrlChoice({ u, url, at });
+  };
+
+  const applyUrlChoice = (kind: "image" | "link", remember: boolean) => {
+    const choice = urlChoice;
+    setUrlChoice(null);
+    if (!choice) return;
+    if (remember) localStorage.setItem(URL_CHOICE_KEY, kind);
+    if (kind === "image" && choice.u.imageUrl) void createImageUrl(choice.u.imageUrl, choice.at.x, choice.at.y, choice.url);
+    else dropLink(choice.u, choice.url, choice.at);
   };
 
   const addImageFile = async (file: File, x: number, y: number) => {
@@ -444,14 +479,25 @@ export function Canvas({
     }
   };
 
-  // Image element from an external URL (no upload) — used for image URLs dropped/pasted in.
-  const createImageUrl = async (src: string, x: number, y: number) => {
+  // Image element from an external URL (no upload) — used for image URLs dropped/pasted in. When
+  // it came from a web page (the image vs link chooser), attribute the source as a caption.
+  const createImageUrl = async (src: string, x: number, y: number, sourceUrl?: string) => {
     const c = connRef.current;
     if (!c) return;
     const { w, h } = await loadImageSize(src);
     const width = 280;
     const id = crypto.randomUUID();
-    c.elements.set(id, { id, type: "image", x, y, w: width, h: Math.max(40, Math.round((width * h) / w)), src });
+    const caption = sourceUrl ? `from <a href="${sourceUrl}">${siteName(sourceUrl)}</a>` : undefined;
+    c.elements.set(id, {
+      id,
+      type: "image",
+      x,
+      y,
+      w: width,
+      h: Math.max(40, Math.round((width * h) / w)),
+      src,
+      ...(caption ? { caption, showCaption: true } : {}),
+    });
     selectId(id);
   };
 
@@ -505,8 +551,7 @@ export function Canvas({
     ).trim();
     if (!uri) return;
     const first = uri.split(/\s+/)[0]!;
-    if (isImageUrl(first)) createImageUrl(first, x, y);
-    else if (/^https?:\/\//i.test(first)) void createLink(first, { x, y });
+    if (/^https?:\/\//i.test(first)) void handleUrl(first, x, y);
     else createNote(x, y, uri.slice(0, 10000));
   };
 
@@ -538,8 +583,7 @@ export function Canvas({
       const text = dt.getData("text").trim();
       if (!text) return;
       const first = text.split(/\s+/)[0]!;
-      if (isImageUrl(first)) createImageUrl(first, x, y);
-      else if (/^https?:\/\//i.test(first)) void createLink(first, { x, y });
+      if (/^https?:\/\//i.test(first)) void handleUrl(first, x, y);
       else createNote(x, y, text.slice(0, 10000));
       e.preventDefault();
     };
@@ -712,6 +756,8 @@ export function Canvas({
         onSubmit={createLink}
       />
 
+      {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
+
       <div
         ref={viewportRef}
         className="relative flex-1 touch-none overflow-hidden bg-slate-50"
@@ -852,11 +898,53 @@ function PeerCursor({ peer, zoom }: { peer: Peer; zoom: number }) {
   );
 }
 
+// Asks whether a dropped/pasted URL with a preview image should become an image or a link card,
+// with an option to remember the answer.
+function UrlChoiceModal({ preview, onPick, onClose }: { preview: Unfurl; onPick: (kind: "image" | "link", remember: boolean) => void; onClose: () => void }) {
+  const [remember, setRemember] = useState(false);
+  return (
+    <Modal open onClose={onClose} title="Add as image or link?">
+      {preview.imageUrl && (
+        <img src={preview.imageUrl} alt="" className="max-h-40 w-full rounded-lg border-2 border-slate-100 object-cover" />
+      )}
+      {preview.title && <p className="truncate text-xs font-bold text-slate-600">{preview.title}</p>}
+      <div className="flex gap-2">
+        <Button className="flex-1" onClick={() => onPick("image", remember)}>
+          <Icon.ImageIcon className="text-base" /> Image
+        </Button>
+        <Button variant="ghost" className="flex-1 border-2 border-slate-200" onClick={() => onPick("link", remember)}>
+          <Icon.LinkIcon className="text-base" /> Link
+        </Button>
+      </div>
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
+        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-2 border-slate-300 accent-primary" />
+        Remember my choice
+      </label>
+    </Modal>
+  );
+}
+
 function linkHost(url: string): string {
   try {
     return new URL(url).host;
   } catch {
     return url;
+  }
+}
+
+// Human site name from a URL: the registrable label, capitalised. uk.pinterest.com → "Pinterest",
+// example.co.uk → "Example". Falls back to the host.
+const TWO_LEVEL_TLD = new Set(["co", "com", "org", "net", "gov", "ac", "edu"]);
+function siteName(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const parts = host.split(".");
+    let idx = parts.length - 2;
+    if (parts.length > 2 && TWO_LEVEL_TLD.has(parts[parts.length - 2]!)) idx = parts.length - 3;
+    const name = parts[idx] ?? host;
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch {
+    return linkHost(url);
   }
 }
 
@@ -907,6 +995,15 @@ function CaptionField({ html, onText, onRegister, onFocusCaption }: { html: stri
       data-empty-placeholder="Add a caption"
       className="note-editable border-t-2 border-slate-100 p-2 text-xs text-slate-700 outline-none"
       onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        // A click on a link inside the editable would just place the caret — open it instead.
+        const a = (e.target as HTMLElement).closest("a");
+        const href = a?.getAttribute("href");
+        if (href) {
+          e.preventDefault();
+          window.open(href, "_blank", "noopener,noreferrer");
+        }
+      }}
       onFocus={() => {
         onRegister({ el: ref.current!, commit: () => onText(sanitizeHtml(ref.current!.innerHTML)) });
         onFocusCaption();

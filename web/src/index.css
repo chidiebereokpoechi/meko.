@@ -92,3 +92,8 @@ body {
   border-radius: 0.2rem;
   padding: 0 0.1rem;
 }
+.note-editable a {
+  color: #6e24ff;
+  text-decoration: underline;
+  cursor: pointer;
+}

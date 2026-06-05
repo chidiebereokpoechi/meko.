@@ -25,7 +25,10 @@ export const linkRoutes = new Elysia({ prefix: "/api/boards" })
       await enforceRateLimit(`rl:user:${userId}:unfurl`, 60, 3600);
 
       const cached = await db.query.unfurls.findFirst({ where: eq(unfurls.url, body.url) });
-      const fresh = cached && Date.now() - cached.fetchedAt.getTime() < CACHE_TTL_MS;
+      const withinTtl = cached && Date.now() - cached.fetchedAt.getTime() < CACHE_TTL_MS;
+      // Don't keep serving an empty unfurl (no title, no image) — retry so a transient miss or a
+      // pre-fix cached blank gets refetched rather than pinned for the full TTL.
+      const fresh = withinTtl && (!!cached!.title || !!cached!.imageUrl);
       if (cached && fresh && query.refresh !== "1") return cached;
 
       // unfurl() re-runs the SSRF check (and on every redirect hop); SsrfError → 422 via onError.

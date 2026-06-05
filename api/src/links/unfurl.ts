@@ -7,7 +7,9 @@ import { isSafeUrl } from "@/lib/safe-url.ts";
 
 const MAX_REDIRECTS = 3;
 const FETCH_TIMEOUT_MS = 5000;
-const MAX_HTML_BYTES = 512 * 1024;
+// Some sites (Pinterest, other SPAs) inject their OG meta tags late in the document — Pinterest's
+// sit near ~900KB — so a small cap misses them. 2 MiB covers these while still bounding memory.
+const MAX_HTML_BYTES = 2 * 1024 * 1024;
 
 export interface UnfurlResult {
   url: string;
@@ -89,7 +91,16 @@ export async function unfurl(rawUrl: string): Promise<UnfurlResult> {
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     let res: Response;
     try {
-      res = await fetch(current, { redirect: "manual", signal: ctrl.signal, headers: { "user-agent": "meko-unfurl/1.0" } });
+      res = await fetch(current, {
+        redirect: "manual",
+        signal: ctrl.signal,
+        // Many sites (Pinterest, etc.) only emit Open Graph tags to a real browser UA; a custom
+        // bot UA gets a login/consent wall with no og:image. Present as a browser.
+        headers: {
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
     } finally {
       clearTimeout(timer);
     }
