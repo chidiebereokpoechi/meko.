@@ -7,6 +7,7 @@ export function NameModal({
   title,
   label,
   submitLabel = "Create",
+  initial = "",
   onSubmit,
   onClose,
 }: {
@@ -14,6 +15,7 @@ export function NameModal({
   title: string;
   label: string;
   submitLabel?: string;
+  initial?: string;
   onSubmit: (value: string) => Promise<void> | void;
   onClose: () => void;
 }) {
@@ -22,9 +24,10 @@ export function NameModal({
 
   useEffect(() => {
     if (open) {
-      setValue("");
+      setValue(initial);
       setBusy(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const submit = async (e: React.FormEvent) => {

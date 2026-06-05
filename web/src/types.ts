@@ -39,6 +39,14 @@ export interface TodoItem {
   done: boolean;
 }
 
+// Directed link between two elements, drawn as an arrow. Optional label shown at its midpoint.
+export interface Connection {
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+}
+
 export interface Board {
   id: string;
   workspaceId: string;

@@ -4,7 +4,7 @@ import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
 import { api } from "../lib/api.ts";
-import type { Board, Element, TodoItem } from "../types.ts";
+import type { Board, Connection, Element, TodoItem } from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
@@ -87,6 +87,11 @@ export function Canvas({
   const [showGrid, setShowGrid] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  // In-progress arrow drag from an element's connect ball; linkEnd is the live pointer (world).
+  const [linking, setLinking] = useState<{ from: string } | null>(null);
+  const [linkEnd, setLinkEnd] = useState<{ x: number; y: number } | null>(null);
+  const [selectedConn, setSelectedConn] = useState<string | null>(null);
+  const [renameConn, setRenameConn] = useState<string | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -99,6 +104,7 @@ export function Canvas({
     };
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
+    c.connections.observe(bump);
 
     // Mirror undo/redo availability into state; the controls publisher (below) builds the full
     // BoardControls object whenever undo state or the view changes.
@@ -116,6 +122,7 @@ export function Canvas({
       mgr.off("stack-item-added", sync);
       mgr.off("stack-item-popped", sync);
       c.elements.unobserve(bump);
+      c.connections.unobserve(bump);
       c.destroy();
       connRef.current = null;
       onControls(null);
@@ -125,11 +132,36 @@ export function Canvas({
   const elements: Element[] = connRef.current
     ? Array.from(connRef.current.elements.values())
     : [];
+  const connections: Connection[] = connRef.current
+    ? Array.from(connRef.current.connections.values())
+    : [];
   // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
   // select many.
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
   const selected = elements.find((e) => e.id === selectedId) ?? null;
-  const selectId = (id: string) => setSelectedIds([id]);
+  const selectId = (id: string) => {
+    setSelectedIds([id]);
+    setSelectedConn(null);
+  };
+
+  // --- Connections (arrows between elements) ---
+  const addConnection = (from: string, to: string) => {
+    const c = connRef.current;
+    if (!c || from === to) return;
+    // Avoid duplicate arrows in the same direction.
+    if (Array.from(c.connections.values()).some((cn) => cn.from === from && cn.to === to)) return;
+    const id = crypto.randomUUID();
+    c.connections.set(id, { id, from, to });
+  };
+  const removeConnection = (id: string) => {
+    connRef.current?.connections.delete(id);
+    setSelectedConn((s) => (s === id ? null : s));
+  };
+  const setConnectionLabel = (id: string, label: string) => {
+    const c = connRef.current;
+    const cur = c?.connections.get(id);
+    if (c && cur) c.connections.set(id, { ...cur, label: label || undefined });
+  };
 
   useEffect(() => {
     for (const el of elements) {
@@ -167,13 +199,29 @@ export function Canvas({
       patch(id, { x, y });
     }
   };
+  // Drop any connections that touch the given elements so no arrow dangles after a delete.
+  const pruneConnections = (ids: Set<string>) => {
+    const c = connRef.current;
+    if (!c) return;
+    for (const cn of Array.from(c.connections.values())) {
+      if (ids.has(cn.from) || ids.has(cn.to)) c.connections.delete(cn.id);
+    }
+  };
   const remove = (id: string) => {
-    connRef.current?.elements.delete(id);
+    const c = connRef.current;
+    c?.doc.transact(() => {
+      c.elements.delete(id);
+      pruneConnections(new Set([id]));
+    });
     setSelectedIds((ids) => ids.filter((x) => x !== id));
     setEditingId((s) => (s === id ? null : s));
   };
   const removeMany = (ids: string[]) => {
-    ids.forEach((id) => connRef.current?.elements.delete(id));
+    const c = connRef.current;
+    c?.doc.transact(() => {
+      ids.forEach((id) => c.elements.delete(id));
+      pruneConnections(new Set(ids));
+    });
     setSelectedIds([]);
     setEditingId(null);
   };
@@ -181,6 +229,7 @@ export function Canvas({
     setSelectedIds([]);
     setEditingId(null);
     setCaptionEditing(false);
+    setSelectedConn(null);
   };
 
   const overDeleteZone = (x: number, y: number) => {
@@ -284,6 +333,27 @@ export function Canvas({
     const r = surfaceRef.current?.getBoundingClientRect();
     if (!r) return { x: 0, y: 0 };
     return { x: (clientX - r.left) / view.zoom, y: (clientY - r.top) / view.zoom };
+  };
+
+  // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
+  // to whatever element sits under the cursor.
+  const startLink = (from: string, e: React.PointerEvent) => {
+    e.stopPropagation();
+    setLinking({ from });
+    setLinkEnd(toWorld(e.clientX, e.clientY));
+    const move = (ev: PointerEvent) => setLinkEnd(toWorld(ev.clientX, ev.clientY));
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const w = toWorld(ev.clientX, ev.clientY);
+      // Topmost element under the pointer (later in array = drawn on top).
+      const target = [...elements].reverse().find((el) => el.id !== from && w.x >= el.x && w.x <= el.x + el.w && w.y >= el.y && w.y <= el.y + el.h);
+      if (target) addConnection(from, target.id);
+      setLinking(null);
+      setLinkEnd(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
   const viewportCentre = () => {
     const r = viewportRef.current?.getBoundingClientRect();
@@ -888,6 +958,18 @@ export function Canvas({
         onSubmit={createBoardElement}
       />
 
+      <NameModal
+        open={!!renameConn}
+        title="Label connection"
+        label="Label"
+        submitLabel="Save"
+        initial={renameConn ? connections.find((c) => c.id === renameConn)?.label ?? "" : ""}
+        onClose={() => setRenameConn(null)}
+        onSubmit={(label) => {
+          if (renameConn) setConnectionLabel(renameConn, label);
+        }}
+      />
+
       {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
 
       <div
@@ -955,6 +1037,19 @@ export function Canvas({
             className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)]" : ""}`}
             style={{ width: WORLD_W, height: WORLD_H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
           >
+            <ConnectionsLayer
+              elements={elements}
+              connections={connections}
+              temp={linking && linkEnd ? { from: elements.find((e) => e.id === linking.from) ?? null, end: linkEnd } : null}
+              zoom={view.zoom}
+              selectedId={selectedConn}
+              onSelect={(id) => {
+                setSelectedConn(id);
+                setSelectedIds([]);
+              }}
+              onRename={(id) => setRenameConn(id)}
+              onDelete={removeConnection}
+            />
             {elements.map((el) => (
               <ElementCard
                 key={el.id}
@@ -981,6 +1076,7 @@ export function Canvas({
                 }
                 onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
                 onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
+                onStartLink={(e) => startLink(el.id, e)}
                 onCaptionFocus={() => {
                   selectId(el.id);
                   setCaptionEditing(true);
@@ -1030,6 +1126,100 @@ function PeerCursor({ peer, zoom }: { peer: Peer; zoom: number }) {
         {peer.name}
       </span>
     </div>
+  );
+}
+
+// Point on an element's border in the direction of (tx,ty) — where an arrow should touch.
+function edgePoint(e: Element, tx: number, ty: number): { x: number; y: number } {
+  const x = e.x + e.w / 2;
+  const y = e.y + e.h / 2;
+  const dx = tx - x;
+  const dy = ty - y;
+  if (!dx && !dy) return { x, y };
+  const s = 1 / Math.max(Math.abs(dx) / (e.w / 2 || 1), Math.abs(dy) / (e.h / 2 || 1));
+  return { x: x + dx * s, y: y + dy * s };
+}
+
+// SVG arrows for connections, plus labels and the per-arrow rename/delete toolbar. Lives inside the
+// transformed world layer so arrows pan/zoom with the board; labels counter-scale to stay legible.
+function ConnectionsLayer({
+  elements,
+  connections,
+  temp,
+  zoom,
+  selectedId,
+  onSelect,
+  onRename,
+  onDelete,
+}: {
+  elements: Element[];
+  connections: Connection[];
+  temp: { from: Element | null; end: { x: number; y: number } } | null;
+  zoom: number;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onRename: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const lines = connections
+    .map((c) => {
+      const from = byId.get(c.from);
+      const to = byId.get(c.to);
+      if (!from || !to) return null;
+      const p1 = edgePoint(from, to.x + to.w / 2, to.y + to.h / 2);
+      const p2 = edgePoint(to, from.x + from.w / 2, from.y + from.h / 2);
+      return { c, p1, p2, mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 } };
+    })
+    .filter(Boolean) as { c: Connection; p1: { x: number; y: number }; p2: { x: number; y: number }; mid: { x: number; y: number } }[];
+
+  const tempP1 = temp?.from ? edgePoint(temp.from, temp.end.x, temp.end.y) : null;
+
+  return (
+    <>
+      <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
+        <defs>
+          <marker id="arrow-slate" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8" /></marker>
+          <marker id="arrow-primary" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6e24ff" /></marker>
+        </defs>
+        {lines.map(({ c, p1, p2 }) => {
+          const sel = c.id === selectedId;
+          return (
+            <g key={c.id} style={{ pointerEvents: "stroke", cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); onSelect(c.id); }}>
+              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="transparent" strokeWidth={16} />
+              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={sel ? "#6e24ff" : "#94a3b8"} strokeWidth={sel ? 3 : 2} markerEnd={`url(#${sel ? "arrow-primary" : "arrow-slate"})`} />
+            </g>
+          );
+        })}
+        {tempP1 && temp && (
+          <line x1={tempP1.x} y1={tempP1.y} x2={temp.end.x} y2={temp.end.y} stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#arrow-primary)" />
+        )}
+      </svg>
+
+      {lines.map(({ c, mid }) => {
+        const sel = c.id === selectedId;
+        if (!sel && !c.label) return null;
+        return (
+          <div
+            key={c.id}
+            className="absolute left-0 top-0 z-[5]"
+            style={{ transform: `translate(${mid.x}px, ${mid.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {sel ? (
+              <div className="flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-white px-1 py-0.5 shadow">
+                <button onClick={() => onRename(c.id)} className="rounded px-2 py-0.5 text-xs font-bold text-slate-600 hover:bg-slate-100">{c.label ? "Rename" : "Name"}</button>
+                <button onClick={() => onDelete(c.id)} className="rounded px-2 py-0.5 text-xs font-bold text-red-500 hover:bg-red-50">Delete</button>
+              </div>
+            ) : (
+              <button onClick={() => onSelect(c.id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
+                {c.label}
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -1242,6 +1432,7 @@ function ElementCard({
   onCaption,
   onCaptionFocus,
   onTodo,
+  onStartLink,
   shrink,
   dragging,
   zoom,
@@ -1263,6 +1454,7 @@ function ElementCard({
   onCaption?: (html: string) => void;
   onCaptionFocus?: () => void;
   onTodo?: (patch: { title?: string; items?: TodoItem[] }) => void;
+  onStartLink?: (e: React.PointerEvent) => void;
   shrink: boolean;
   dragging: boolean;
   zoom: number;
@@ -1462,6 +1654,16 @@ function ElementCard({
         <div className="grid h-full place-items-center text-slate-400">
           {el.type}
         </div>
+      )}
+
+      {selected && onStartLink && (
+        // Connect ball: drag onto another element to wire an arrow between them.
+        <button
+          onPointerDown={onStartLink}
+          aria-label="Connect"
+          title="Drag to connect"
+          className="absolute -right-2.5 -top-2.5 z-10 h-4 w-4 cursor-crosshair rounded-full border-2 border-white bg-primary shadow"
+        />
       )}
 
       <div
