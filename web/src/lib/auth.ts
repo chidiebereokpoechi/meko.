@@ -14,14 +14,20 @@ export const setAccessToken = (t: string | null) => {
 // Refresh sends the HttpOnly cookie automatically (credentials: include). Returns true if a new
 // access token was obtained.
 export async function refresh(): Promise<boolean> {
-  const res = await fetch(`${API}/api/auth/refresh`, { method: "POST", credentials: "include" });
-  if (!res.ok) {
+  try {
+    const res = await fetch(`${API}/api/auth/refresh`, { method: "POST", credentials: "include" });
+    if (!res.ok) {
+      accessToken = null;
+      return false;
+    }
+    const { accessToken: tok } = (await res.json()) as { accessToken: string };
+    accessToken = tok;
+    return true;
+  } catch {
+    // Network error / API down — treat as unauthenticated rather than hanging the boot screen.
     accessToken = null;
     return false;
   }
-  const { accessToken: tok } = (await res.json()) as { accessToken: string };
-  accessToken = tok;
-  return true;
 }
 
 export async function login(email: string, password: string): Promise<void> {
