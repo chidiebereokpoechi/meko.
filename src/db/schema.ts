@@ -161,6 +161,27 @@ export const idempotencyKeys = pgTable("idempotency_keys", {
   createdAt: now(),
 }, (t) => [index("idempotency_keys_expires_idx").on(t.expiresAt)]);
 
+// --- Media (§6) ---
+
+export const mediaStatusEnum = pgEnum("media_status", ["pending", "ready", "failed"]);
+
+export const media = pgTable("media", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boardId: uuid("board_id").notNull().references(() => boards.id, { onDelete: "cascade" }),
+  ownerId: uuid("owner_id").notNull().references(() => users.id),
+  status: mediaStatusEnum("status").notNull().default("pending"),
+  // Client-declared content type at presign time; the worker re-sniffs the actual bytes (§6e).
+  declaredType: text("declared_type").notNull(),
+  // Raw client upload; for SVG this is the download-only original (edit-gated).
+  originalKey: text("original_key").notNull(),
+  // Sanitised, re-encoded derivative an element's src resolves to.
+  displayKey: text("display_key"),
+  thumbKey: text("thumb_key"),
+  bytes: integer("bytes"),
+  error: text("error"),
+  createdAt: now(),
+}, (t) => [index("media_board_idx").on(t.boardId, t.createdAt.desc())]);
+
 export const auditLog = pgTable("audit_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),

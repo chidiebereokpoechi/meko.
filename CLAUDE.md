@@ -132,6 +132,15 @@ Building per v4 §15.
   10/min per IP. Refresh rotation-on-every-use + family revocation already in place (§9h). CSP
   is enforced (not report-only).
 
-Later phases (media, links, sharing, exports, polish) are tracked in the plan and not yet built.
+- **Phase 4 (media) — done.** S3-compatible storage via Bun's native `S3Client`
+  (`src/lib/storage.ts`) with split internal/public endpoints — data ops over the internal host,
+  presigned URLs signed for the public host (SigV4 binds the host). Upload flow: presign PUT
+  (edit access + 50/hr/user) → client PUT → `complete` enqueues `process-upload`. Worker
+  (`src/media/process.ts`) re-sniffs bytes (`src/media/transcode.ts`, never trusts the declared
+  type), rasterises SVG→PNG and re-encodes rasters→WebP via Sharp (strips embedded scripts, §6e),
+  emits display + thumbnail derivatives. `media` row tracks status; element `src` resolves to the
+  display derivative; the raw original is edit-gated (a read-only guest can't fetch a scriptable SVG).
+
+Later phases (links, sharing, exports, polish) are tracked in the plan and not yet built.
 When you implement a phase item, check it against the invariant it maps to above. Authenticated
 API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.

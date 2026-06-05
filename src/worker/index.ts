@@ -4,11 +4,15 @@ import { closeDb } from "@/db/client.ts";
 import { closeRedis } from "@/lib/redis.ts";
 import { claimJob, completeJob, enqueue, failJob, type Job } from "@/worker/queue.ts";
 import { compactBoard, findStaleBoards } from "@/realtime/persistence.ts";
+import { processUpload } from "@/media/process.ts";
 
-// Job handlers keyed by type. Phase-1 handler set; media/export/email land in later phases.
+// Job handlers keyed by type. Export/email land in later phases.
 const handlers: Record<string, (payload: any) => Promise<void>> = {
   async compact({ boardId }: { boardId: string }) {
     await compactBoard(boardId);
+  },
+  async "process-upload"({ mediaId }: { mediaId: string }) {
+    await processUpload(mediaId);
   },
 };
 
