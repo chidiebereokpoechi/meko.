@@ -30,33 +30,37 @@ two would conflict, **v4 wins**. Section references below (e.g. §3e) point into
 
 ## Layout
 
+The repo has two apps: **`api/`** (this Bun backend) and **`web/`** (the Vite/React canvas client,
+see [web/DESIGN.md](web/DESIGN.md)). Everything below lives under `api/`.
+
 ```
-src/
-  index.ts            Elysia app: HTTP routes + .ws("/boards/:id") (origin check + ticket auth)
-  config.ts           env parsing (Zod), single source of truth
-  db/
-    schema.ts         Drizzle tables + indexes + autovacuum overrides
-    client.ts         pooled (DATABASE_URL) + direct (POSTGRES_DIRECT_URL) clients
-    migrate.ts        migration runner — DIRECT URL only (§3d)
-  lib/
-    logger.ts         pino + request-context ALS (§3g)
-    redis.ts          shared ioredis connections
-  http/
-    middleware/       security-headers, cors, request-context, timeout (Elysia plugins/helpers)
-    routes/           health, auth (+ ws-ticket), ...
-  auth/
-    tokens.ts         access-token-in-memory contract + refresh rotation (§9g/9h)
-    ws-ticket.ts      single-use WS ticket exchange (§5g)
-  realtime/
-    room.ts           per-board Y.Doc + local client fanout, size gate (§4e)
-    room-sync.ts      Redis pub/sub bus across nodes (§3e)
-    persistence.ts    snapshot/update load + compaction + retention (§5c/5h/5i)
-  worker/
-    index.ts          job worker loop
-    queue.ts          SKIP LOCKED claim + dead-letter + backoff (§12o/12n)
-deploy/
-  docker-compose.yml  db, pgbouncer, redis, app, nginx, pg-backup, export-sidecar
-  nginx.conf          TLS termination + WS upgrade proxy (§11b)
+api/
+  src/
+    index.ts            Elysia app: HTTP routes + .ws("/boards/:id") (origin check + ticket auth)
+    config.ts           env parsing (Zod), single source of truth
+    db/
+      schema.ts         Drizzle tables + indexes + autovacuum overrides
+      client.ts         pooled (DATABASE_URL) + direct (POSTGRES_DIRECT_URL) clients
+      migrate.ts        migration runner — DIRECT URL only (§3d)
+    lib/
+      logger.ts         pino + request-context ALS (§3g)
+      redis.ts          shared ioredis connections
+    http/
+      middleware/       security-headers, cors, request-context, timeout (Elysia plugins/helpers)
+      routes/           health, auth (+ ws-ticket), ...
+    auth/
+      tokens.ts         access-token-in-memory contract + refresh rotation (§9g/9h)
+      ws-ticket.ts      single-use WS ticket exchange (§5g)
+    realtime/
+      room.ts           per-board Y.Doc + local client fanout, size gate (§4e)
+      room-sync.ts      Redis pub/sub bus across nodes (§3e)
+      persistence.ts    snapshot/update load + compaction + retention (§5c/5h/5i)
+    worker/
+      index.ts          job worker loop
+      queue.ts          SKIP LOCKED claim + dead-letter + backoff (§12o/12n)
+  deploy/
+    docker-compose.yml  db, pgbouncer, redis, app, nginx, pg-backup, export-sidecar
+    nginx.conf          TLS termination + WS upgrade proxy (§11b)
 ```
 
 ## Non-negotiable invariants
@@ -110,10 +114,13 @@ These are the load-bearing correctness/security rules from v4. Do not regress th
 
 ## Commands
 
+All backend commands run from `api/`:
+
 ```bash
+cd api
 bun install
 cp .env.example .env          # then edit secrets
-docker compose -f deploy/docker-compose.yml up -d db pgbouncer redis
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db pgbouncer redis
 bun run db:generate           # emit SQL from schema.ts
 bun run db:migrate            # apply via POSTGRES_DIRECT_URL
 bun run dev                   # app (HTTP + WS) with watch
@@ -121,6 +128,8 @@ bun run worker                # job worker
 bun run typecheck
 bun test
 ```
+
+Frontend lives in `web/` (`cd web && bun install && bun run dev`).
 
 ## Phase status
 

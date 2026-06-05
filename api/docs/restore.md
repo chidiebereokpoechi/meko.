@@ -1,7 +1,7 @@
 # Backup & restore (§11c)
 
-The `pg-backup` compose service runs a daily `pg_dump`, gzips it into `deploy/backups/`, and
-prunes dumps older than 7 days.
+Run these from the `api/` directory. The `pg-backup` compose service runs a daily `pg_dump`,
+gzips it into `deploy/backups/`, and prunes dumps older than 7 days.
 
 ## Restore
 

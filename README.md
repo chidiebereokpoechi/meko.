@@ -22,9 +22,16 @@ Design: [meko-plan-v4.md](meko-plan-v4.md). Working agreement + invariants: [CLA
 `bun test` runs the suite (live S3 + Chromium render are opt-in/skipped). `bun run bench` is the
 performance regression gate.
 
+## Repository layout
+
+- **`api/`** — Bun + Elysia backend (HTTP + WS, workers, deploy infra). See [CLAUDE.md](CLAUDE.md).
+- **`web/`** — Vite + React canvas client. See [web/DESIGN.md](web/DESIGN.md).
+
 ## Quickstart (local dev)
 
 ```bash
+# --- backend ---
+cd api
 bun install
 cp .env.example .env                      # then point at the dev ports below
 
@@ -39,10 +46,14 @@ bun run db:migrate      # apply via POSTGRES_DIRECT_URL + autovacuum tuning
 bun run dev             # HTTP + WS on :3000
 bun run worker          # job worker (compaction etc.)
 bun test                # multi-node convergence
+
+# --- frontend (separate terminal) ---
+cd web && bun install && bun run dev      # http://localhost:5173
 ```
 
 ## Production
 
-`deploy/docker-compose.yml` brings up db, pgbouncer, redis, migrate (one-shot), app, worker,
+`api/deploy/docker-compose.yml` brings up db, pgbouncer, redis, migrate (one-shot), app, worker,
 nginx (TLS termination), and pg-backup. Set `JWT_SECRET`, `MEKO_ALLOWED_ORIGINS`, `MEKO_BASE_URL`
-and provide TLS certs in `deploy/certs/`. See [docs/restore.md](docs/restore.md) for backups.
+and provide TLS certs in `api/deploy/certs/`. See [api/docs/restore.md](api/docs/restore.md) for
+backups. Build `web/` to static assets and serve them from the same nginx origin.
