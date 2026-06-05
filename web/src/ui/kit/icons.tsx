@@ -24,3 +24,7 @@ export const ChevronDown = svg(<path d="m6 9 6 6 6-6" />);
 export const ArrowLeftIcon = svg(<path d="M19 12H5m0 0 6-6m-6 6 6 6" />);
 export const AlignIcon = svg(<path d="M4 6h16M4 12h10M4 18h16" />);
 export const PaintIcon = svg(<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" /></>);
+export const BulletListIcon = svg(<><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" fill="currentColor" /><circle cx="4.5" cy="12" r="1" fill="currentColor" /><circle cx="4.5" cy="18" r="1" fill="currentColor" /></>);
+export const NumberListIcon = svg(<path d="M10 6h10M10 12h10M10 18h10M4 5v3M3 12h2l-2 3h2" />);
+export const LinkToolIcon = LinkIcon;
+

@@ -37,6 +37,14 @@ Three zones:
 - **Components come from `src/ui/kit/`** — `Button`, `TextField`, `Modal`, `toast`, `icons`.
   Don't hand-roll one-off buttons/inputs; extend the kit so the look stays uniform.
 - Async actions show a loading state (`Button loading`) and surface failures via `toast`.
+- **Select then edit.** First click selects an element (shows its contextual rail); a second
+  click enters edit mode (text caret). Clicking empty canvas deselects.
+- **One rail, contextual.** A selected note swaps the create-rail for its formatting rail
+  (`NoteSubRail`) — the same rail stays while the caret is active; never a second toolbar.
+- **Rich text is sanitised HTML.** Notes are `contentEditable`; formatting is `execCommand` on
+  the selection. The HTML comes from peers, so `sanitizeHtml` (allowlist tags + a few style
+  props) runs before persisting to Yjs AND before rendering. Never inject unsanitised innerHTML.
+  (Per-note last-write-wins; true char-merged rich text would need a Y.Xml binding — deferred.)
 
 ## Kit reference
 
