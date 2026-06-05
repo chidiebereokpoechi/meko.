@@ -116,8 +116,17 @@ bun test
 
 ## Phase status
 
-Building per v4 §15. **Phase 1 (collab spike)** is the current focus: Redis pub/sub,
-multi-node Yjs convergence, WS ticket exchange, doc size limit, `SKIP LOCKED` worker. Later
-phases (canvas/elements, auth hardening, media, links, sharing, exports, polish) are tracked
-in the plan and not yet built. When you implement a phase item, check it against the
-invariant it maps to above.
+Building per v4 §15.
+
+- **Phase 1 (collab spike) — done.** Redis pub/sub multi-node Yjs convergence, WS ticket
+  exchange, doc size limit, `SKIP LOCKED` worker, security headers/CSP/CORS, health, logging.
+- **Phase 2 (canvas core + element model) — done.** Element Zod model (`src/elements/schema.ts`,
+  hex-only style §4b, http(s)-only URL fields §4d), bearer auth guard (`src/auth/middleware.ts`),
+  permissions (`src/lib/permissions.ts` — workspace role + board view/edit), cursor pagination
+  (`src/lib/pagination.ts` §13c), REST CRUD for workspaces/boards/comments, and the WS
+  board-access check (viewers join read-only; edit-gated updates).
+
+Later phases (auth hardening, media, links, sharing, exports, polish) are tracked in the plan
+and not yet built. When you implement a phase item, check it against the invariant it maps to
+above. Note: signup/login is **Phase 3** — there is no credential flow yet; access tokens are
+minted directly in tests via `mintAccessToken`.

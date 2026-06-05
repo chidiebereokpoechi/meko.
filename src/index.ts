@@ -10,7 +10,11 @@ import { requestContext } from "@/http/middleware/request-context.ts";
 import { timeoutResponse } from "@/http/middleware/timeout.ts";
 import { health } from "@/http/routes/health.ts";
 import { auth } from "@/http/routes/auth.ts";
+import { workspaceRoutes } from "@/http/routes/workspaces.ts";
+import { boardRoutes } from "@/http/routes/boards.ts";
 import { redeemWsTicket } from "@/auth/ws-ticket.ts";
+import { boardAccess, ForbiddenError } from "@/lib/permissions.ts";
+import { securityEvent } from "@/lib/logger.ts";
 import { roomManager, type LocalClient } from "@/realtime/room.ts";
 
 const allowedOrigins = new Set(config.MEKO_ALLOWED_ORIGINS);
@@ -20,6 +24,7 @@ interface WsData {
   id: string;
   boardId: string;
   userId: string | null;
+  canEdit: boolean;
   authTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -29,11 +34,24 @@ roomManager.start();
 const sockets = new WeakMap<object, WsData>();
 
 const app = new Elysia()
-  .onError(({ error, set, request }) => {
+  .onError(({ code, error, set, request }) => {
     const mapped = timeoutResponse(error, new URL(request.url).pathname);
     if (mapped) {
       set.status = mapped.status;
       return mapped.body;
+    }
+    if (error instanceof ForbiddenError) {
+      set.status = 403;
+      return { error: "FORBIDDEN" };
+    }
+    // Let Elysia's built-in error classes keep their status (422 validation, 404, parse errors).
+    if (code === "VALIDATION") {
+      set.status = 422;
+      return { error: "VALIDATION" };
+    }
+    if (code === "NOT_FOUND") {
+      set.status = 404;
+      return { error: "NOT_FOUND" };
     }
     log.error({ err: error, action: "http.error" }, "unhandled error");
     set.status = 500;
@@ -44,6 +62,8 @@ const app = new Elysia()
   .use(requestContext)
   .use(health)
   .use(auth)
+  .use(workspaceRoutes)
+  .use(boardRoutes)
   // WebSocket board endpoint. Origin is validated at the upgrade; auth is by ticket message.
   .ws("/boards/:boardId", {
     // §5g step 1: reject cross-origin upgrades — the only CSRF control browsers enforce on WS.
@@ -60,6 +80,7 @@ const app = new Elysia()
         id: crypto.randomUUID(),
         boardId,
         userId: null,
+        canEdit: false,
         // §5g step 4: close if no auth message arrives within 5s.
         authTimer: setTimeout(() => ws.close(4401, "auth timeout"), 5000),
       };
@@ -81,8 +102,16 @@ const app = new Elysia()
             ws.close(4401, "invalid ticket");
             return;
           }
-          // TODO(phase-6): board-access permission check for userId on state.boardId.
+          // Board-access check: no membership/grant ⇒ refuse the socket. Viewers may join but
+          // cannot push updates (edit-gated below).
+          const access = await boardAccess(userId, state.boardId);
+          if (!access) {
+            securityEvent("ws.board_denied", { userId, boardId: state.boardId });
+            ws.close(4403, "forbidden");
+            return;
+          }
           state.userId = userId;
+          state.canEdit = access === "edit";
           if (state.authTimer) clearTimeout(state.authTimer);
           state.authTimer = null;
           await roomManager.join(state.boardId, makeClient(ws, state));
@@ -93,6 +122,11 @@ const app = new Elysia()
       // Binary Yjs update — only accepted after authentication.
       if (!state.userId) {
         ws.close(4401, "unauthenticated");
+        return;
+      }
+      // Viewers receive updates but cannot make them (§9).
+      if (!state.canEdit) {
+        securityEvent("ws.edit_denied", { userId: state.userId, boardId: state.boardId });
         return;
       }
       const update = toUint8(raw);

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import * as Y from "yjs";
 import { directDb } from "@/db/client.ts";
-import { boards, users, workspaces } from "@/db/schema.ts";
+import { boards, members, users, workspaces } from "@/db/schema.ts";
 import { mintAccessToken } from "@/auth/tokens.ts";
 
 // §14d: prove multi-node convergence. Two app processes share Redis + Postgres; an update made
@@ -70,6 +70,7 @@ beforeAll(async () => {
   const db = directDb();
   const [u] = await db.insert(users).values({ email: `t${Date.now()}@x.test`, displayName: "T" }).returning();
   const [w] = await db.insert(workspaces).values({ name: "W", ownerId: u!.id }).returning();
+  await db.insert(members).values({ workspaceId: w!.id, userId: u!.id, role: "owner" });
   const [b] = await db.insert(boards).values({ workspaceId: w!.id, title: "B" }).returning();
   boardId = b!.id;
   token = mintAccessToken(u!.id);
