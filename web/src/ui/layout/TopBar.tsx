@@ -17,6 +17,7 @@ export function TopBar({
   canUndo,
   canRedo,
   onExport,
+  onShare,
 }: {
   workspaces: (Workspace & { role: string })[];
   activeWs: string | null;
@@ -30,6 +31,7 @@ export function TopBar({
   canUndo?: boolean;
   canRedo?: boolean;
   onExport?: () => void;
+  onShare?: () => void;
 }) {
   const active = workspaces.find((w) => w.id === activeWs);
   return (
@@ -104,7 +106,7 @@ export function TopBar({
       {/* Board actions row (canvas view). */}
       {onExport && (
         <div className="flex items-center justify-end gap-2 border-b-2 border-slate-100 bg-white px-4 py-2">
-          <button className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100" onClick={() => toast("Sharing coming soon")}>
+          <button className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100" onClick={onShare}>
             <Icon.ShareIcon className="text-base" /> Share
           </button>
           <button className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100" onClick={onExport}>

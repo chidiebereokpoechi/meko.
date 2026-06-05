@@ -8,6 +8,8 @@ import { Boards } from "./ui/Boards.tsx";
 import { Canvas, type BoardControls } from "./ui/Canvas.tsx";
 import { TopBar } from "./ui/layout/TopBar.tsx";
 import { NameModal } from "./ui/NameModal.tsx";
+import { ShareModal } from "./ui/ShareModal.tsx";
+import { AcceptToken } from "./ui/AcceptToken.tsx";
 import { Toaster, toast } from "./ui/kit/index.ts";
 
 type WorkspaceWithRole = Workspace & { role: string };
@@ -44,6 +46,8 @@ export function App() {
   return (
     <>
       <Routes>
+        <Route path="share/:token" element={<AcceptToken kind="share" reload={loadWorkspaces} />} />
+        <Route path="invite/:token" element={<AcceptToken kind="invite" reload={loadWorkspaces} />} />
         <Route
           element={
             <Shell
@@ -95,6 +99,8 @@ function Shell({
 }) {
   const { workspaceId, boardId } = useParams();
   const navigate = useNavigate();
+  const [share, setShare] = useState(false);
+  const role = workspaces.find((w) => w.id === workspaceId)?.role ?? null;
   return (
     <div className="flex h-screen flex-col bg-white">
       <TopBar
@@ -110,8 +116,18 @@ function Shell({
         canUndo={!!controls?.canUndo}
         canRedo={!!controls?.canRedo}
         onExport={controls?.exportPng}
+        onShare={boardId ? () => setShare(true) : undefined}
       />
       <Outlet />
+      {boardId && workspaceId && (
+        <ShareModal
+          open={share}
+          onClose={() => setShare(false)}
+          boardId={boardId}
+          workspaceId={workspaceId}
+          canInvite={role === "owner" || role === "admin"}
+        />
+      )}
     </div>
   );
 }
