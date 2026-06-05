@@ -516,7 +516,7 @@ export function Canvas({
         )}
         <div
           ref={scrollRef}
-          className="h-full w-full overflow-auto bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)] [background-size:24px_24px]"
+          className="h-full w-full overflow-auto bg-slate-50"
           onDragOver={(e) => {
             e.preventDefault();
             if (!dragOver) setDragOver(true);
@@ -529,7 +529,7 @@ export function Canvas({
         >
           <div
             ref={surfaceRef}
-            className="relative h-[3000px] w-[4000px]"
+            className="relative h-[3000px] w-[4000px] bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)] [background-size:24px_24px]"
             onPointerDown={deselect}
           >
             {elements.map((el) => (
