@@ -43,12 +43,13 @@ export const workspaceRoutes = new Elysia({ prefix: "/api" })
     const rows = await db
       .select()
       .from(boards)
-      .where(and(eq(boards.workspaceId, params.id), cursor ? lt(boards.updatedAt, cursor) : undefined))
+      // Top-level only — nested boards live inside their parent and are reached by opening it.
+      .where(and(eq(boards.workspaceId, params.id), isNull(boards.parentBoardId), cursor ? lt(boards.updatedAt, cursor) : undefined))
       .orderBy(desc(boards.updatedAt))
       .limit(PAGE_SIZE);
     return page(rows, (b) => b.updatedAt);
   })
-  // Create a board in a workspace. Requires editor+ role.
+  // Create a board in a workspace. Requires editor+ role. An optional parentBoardId nests it.
   .post(
     "/workspaces/:id/boards",
     async ({ userId, params, body, set }) => {
@@ -57,10 +58,18 @@ export const workspaceRoutes = new Elysia({ prefix: "/api" })
         set.status = 403;
         return { error: "FORBIDDEN" };
       }
-      const [board] = await db.insert(boards).values({ workspaceId: params.id, title: body.title ?? "Untitled" }).returning();
+      if (body.parentBoardId) {
+        // Parent must exist in this same workspace — prevents cross-workspace nesting.
+        const [parent] = await db.select({ id: boards.id }).from(boards).where(and(eq(boards.id, body.parentBoardId), eq(boards.workspaceId, params.id))).limit(1);
+        if (!parent) {
+          set.status = 404;
+          return { error: "PARENT_NOT_FOUND" };
+        }
+      }
+      const [board] = await db.insert(boards).values({ workspaceId: params.id, title: body.title ?? "Untitled", parentBoardId: body.parentBoardId ?? null }).returning();
       return board;
     },
-    { body: t.Object({ title: t.Optional(t.String({ maxLength: 300 })) }) },
+    { body: t.Object({ title: t.Optional(t.String({ maxLength: 300 })), parentBoardId: t.Optional(t.String({ format: "uuid" })) }) },
   )
   // --- Member management ---
   // Members of a workspace (any member may view). Owner first, then by join order.

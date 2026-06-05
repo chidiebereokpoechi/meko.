@@ -9,7 +9,8 @@ export function TopBar({
   activeWs,
   onPickWorkspace,
   onNewWorkspace,
-  crumb,
+  crumb = [],
+  onCrumb,
   onHome,
   onLogout,
   undo,
@@ -23,7 +24,8 @@ export function TopBar({
   activeWs: string | null;
   onPickWorkspace: (id: string) => void;
   onNewWorkspace: () => void;
-  crumb?: string;
+  crumb?: { id: string; title: string }[];
+  onCrumb?: (id: string) => void;
   onHome: () => void;
   onLogout: () => void;
   undo?: () => void;
@@ -64,12 +66,21 @@ export function TopBar({
         </MenuItems>
       </Menu>
 
-      {crumb && (
-        <>
-          <span className="text-slate-300">/</span>
-          <span className="font-bold text-slate-500">{crumb}</span>
-        </>
-      )}
+      {crumb.map((c, i) => {
+        const last = i === crumb.length - 1;
+        return (
+          <span key={c.id} className="flex items-center gap-3">
+            <span className="text-slate-300">/</span>
+            {last ? (
+              <span className="font-bold text-slate-500">{c.title}</span>
+            ) : (
+              <button onClick={() => onCrumb?.(c.id)} className="font-bold text-slate-400 hover:text-primary-dark">
+                {c.title}
+              </button>
+            )}
+          </span>
+        );
+      })}
 
       <span className="flex-1" />
 

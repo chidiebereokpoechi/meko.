@@ -74,6 +74,11 @@ export const TodoElement = z
   .object({ ...Base, type: z.literal("todo"), title: z.string().max(500).optional(), items: z.array(TodoItem).max(500) })
   .strict();
 
+// A tile that opens another board in the same workspace (nested boards).
+export const BoardElement = z
+  .object({ ...Base, type: z.literal("board"), boardId: z.string().uuid(), title: z.string().max(300).optional() })
+  .strict();
+
 export const Element = z.discriminatedUnion("type", [
   NoteElement,
   TextElement,
@@ -82,6 +87,7 @@ export const Element = z.discriminatedUnion("type", [
   FileElement,
   EmbedElement,
   TodoElement,
+  BoardElement,
 ]);
 
 export type Element = z.infer<typeof Element>;

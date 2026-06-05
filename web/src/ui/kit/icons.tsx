@@ -36,4 +36,5 @@ export const ChatIcon = svg(<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 
 export const CloseIcon = svg(<path d="M6 6l12 12M18 6 6 18" />);
 export const SendIcon = svg(<path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />);
 export const TodoIcon = svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 12 2 2 3-4M14 13h4" /></>);
+export const BoardIcon = svg(<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 9v12" /></>);
 

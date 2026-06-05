@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigserial,
   customType,
   index,
@@ -58,12 +59,16 @@ export const members = pgTable("members", {
 export const boards = pgTable("boards", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  // Parent board for nested boards; null = top-level (the only ones listed at the workspace level).
+  parentBoardId: uuid("parent_board_id").references((): AnyPgColumn => boards.id, { onDelete: "cascade" }),
   title: text("title").notNull().default("Untitled"),
   createdAt: now(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
   // Board list by workspace, newest first (§13b).
   index("boards_workspace_updated_idx").on(t.workspaceId, t.updatedAt.desc()),
+  // Children of a board (nested-board navigation).
+  index("boards_parent_idx").on(t.parentBoardId),
 ]);
 
 export const permLevelEnum = pgEnum("perm_level", ["view", "edit"]);

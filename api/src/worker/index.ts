@@ -5,6 +5,7 @@ import { closeRedis } from "@/lib/redis.ts";
 import { claimJob, completeJob, enqueue, failJob, type Job } from "@/worker/queue.ts";
 import { compactBoard, findStaleBoards } from "@/realtime/persistence.ts";
 import { processUpload } from "@/media/process.ts";
+import { cleanupOrphanBoards } from "@/worker/orphans.ts";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/client.ts";
 
@@ -22,6 +23,7 @@ const handlers: Record<string, (payload: any) => Promise<void>> = {
     await db.execute(sql`DELETE FROM refresh_tokens WHERE expires_at < now()`);
     await db.execute(sql`DELETE FROM invites WHERE expires_at < now() AND accepted_at IS NULL`);
     await db.execute(sql`DELETE FROM share_links WHERE expires_at IS NOT NULL AND expires_at < now()`);
+    await cleanupOrphanBoards();
   },
 };
 

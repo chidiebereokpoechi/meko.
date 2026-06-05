@@ -16,6 +16,23 @@ export const boardRoutes = new Elysia({ prefix: "/api/boards" })
     const [board] = await db.select().from(boards).where(eq(boards.id, params.id)).limit(1);
     return board;
   })
+  // Ancestor chain (root → this board) for the breadcrumb. Walks parentBoardId up, depth-capped.
+  .get("/:id/path", async ({ userId, params }) => {
+    await requireBoardAccess(userId!, params.id, "view");
+    const chain: { id: string; title: string }[] = [];
+    let cursor: string | null = params.id;
+    for (let i = 0; i < 32 && cursor; i++) {
+      const [b]: { id: string; title: string; parentBoardId: string | null }[] = await db
+        .select({ id: boards.id, title: boards.title, parentBoardId: boards.parentBoardId })
+        .from(boards)
+        .where(eq(boards.id, cursor))
+        .limit(1);
+      if (!b) break;
+      chain.unshift({ id: b.id, title: b.title });
+      cursor = b.parentBoardId;
+    }
+    return chain;
+  })
   .patch(
     "/:id",
     async ({ userId, params, body }) => {

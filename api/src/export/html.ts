@@ -61,6 +61,8 @@ function renderElement(e: Element): string {
       return `<div style="${base};border:2px solid #ccc;padding:6px">${esc(e.name)}</div>`;
     case "embed":
       return `<div style="${base};border:2px dashed #999"></div>`;
+    case "board":
+      return `<div style="${base};border:2px solid #ccc;border-radius:8px;padding:8px;font-weight:bold">${esc(e.title ?? "Board")}</div>`;
     case "todo": {
       const rows = e.items
         .map((it) => `<div style="display:flex;gap:6px;align-items:center">${it.done ? "☑" : "☐"}<span style="${it.done ? "text-decoration:line-through;color:#94a3b8" : ""}">${esc(it.text)}</span></div>`)

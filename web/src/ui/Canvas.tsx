@@ -3,7 +3,8 @@ import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
-import type { Element, TodoItem } from "../types.ts";
+import { api } from "../lib/api.ts";
+import type { Board, Element, TodoItem } from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
@@ -11,6 +12,7 @@ import { LinkSubRail } from "./LinkSubRail.tsx";
 import { ImageSubRail } from "./ImageSubRail.tsx";
 import { CommonSubRail } from "./CommonSubRail.tsx";
 import { TodoSubRail } from "./TodoSubRail.tsx";
+import { BoardSubRail } from "./BoardSubRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
@@ -31,10 +33,14 @@ export interface BoardControls {
 
 export function Canvas({
   boardId,
+  workspaceId,
   onControls,
+  onOpenBoard,
 }: {
   boardId: string;
+  workspaceId: string;
   onControls: (c: BoardControls | null) => void;
+  onOpenBoard: (boardId: string) => void;
 }) {
   const connRef = useRef<BoardConnection | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -58,6 +64,7 @@ export function Canvas({
   const [linkModal, setLinkModal] = useState<{ x: number; y: number } | null>(
     null,
   );
+  const [boardModal, setBoardModal] = useState<{ x: number; y: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   // Marquee selection rectangle in screen coords while dragging empty canvas.
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -415,6 +422,21 @@ export function Canvas({
     selectId(id);
   };
 
+  // Create a new board in this workspace and drop a tile that opens it (nested boards).
+  const createBoardElement = async (title: string) => {
+    const c = connRef.current;
+    const at = boardModal ?? viewportCentre();
+    if (!c) return;
+    try {
+      const b = await api<Board>(`/api/workspaces/${workspaceId}/boards`, { method: "POST", body: JSON.stringify({ title, parentBoardId: boardId }) });
+      const id = crypto.randomUUID();
+      c.elements.set(id, { id, type: "board", x: at.x, y: at.y, w: 200, h: 116, boardId: b.id, title: b.title, style: { fill: "#ffffff" } });
+      selectId(id);
+    } catch {
+      toast("Couldn't create board", "error");
+    }
+  };
+
   const pickImageAt = (x: number, y: number) => {
     dropCoords.current = { x, y };
     fileRef.current?.click();
@@ -554,6 +576,7 @@ export function Canvas({
       else if (tool === "image") pickImageAt(x, y);
       else if (tool === "link") setLinkModal({ x, y });
       else if (tool === "todo") createTodo(x, y);
+      else if (tool === "board") setBoardModal({ x, y });
       return;
     }
 
@@ -641,6 +664,13 @@ export function Canvas({
       dragKey: "todo",
       onPlace: () => createTodo(viewportCentre().x, viewportCentre().y),
     },
+    {
+      key: "board",
+      label: "Board",
+      icon: <Icon.BoardIcon />,
+      dragKey: "board",
+      onPlace: () => setBoardModal(viewportCentre()),
+    },
   ];
 
   const isNoteSelected =
@@ -648,6 +678,7 @@ export function Canvas({
   const isLinkSelected = selected && selected.type === "link";
   const isImageSelected = selected && selected.type === "image";
   const isTodoSelected = selected && selected.type === "todo";
+  const isBoardSelected = selected && selected.type === "board";
   // Merge a hex into the selected element's style, or delete the key when null.
   const setStyleKey = (key: "fill" | "strip", hex: string | null) => {
     if (!selected) return;
@@ -770,6 +801,17 @@ export function Canvas({
           onStrip={(hex) => setStyleKey("strip", hex)}
           onDelete={() => selectedId && remove(selectedId)}
         />
+      ) : isBoardSelected ? (
+        <BoardSubRail
+          el={selected}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onOpen={() => onOpenBoard(selected.boardId)}
+          onFill={(hex) => setStyleKey("fill", hex)}
+          onStrip={(hex) => setStyleKey("strip", hex)}
+          onDelete={() => selectedId && remove(selectedId)}
+        />
       ) : (
         <ToolRail
           tools={createTools}
@@ -792,6 +834,15 @@ export function Canvas({
         submitLabel="Add"
         onClose={() => setLinkModal(null)}
         onSubmit={createLink}
+      />
+
+      <NameModal
+        open={!!boardModal}
+        title="New board"
+        label="Board title"
+        submitLabel="Create"
+        onClose={() => setBoardModal(null)}
+        onSubmit={createBoardElement}
       />
 
       {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
@@ -881,7 +932,9 @@ export function Canvas({
                 onOpen={
                   el.type === "link"
                     ? () => window.open(el.url, "_blank", "noopener,noreferrer")
-                    : undefined
+                    : el.type === "board"
+                      ? () => onOpenBoard(el.boardId)
+                      : undefined
                 }
                 onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
                 onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
@@ -1352,6 +1405,15 @@ function ElementCard({
         <div className="flex w-full flex-col overflow-hidden">
           {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
           <TodoBody el={el} onChange={(p) => onTodo?.(p)} />
+        </div>
+      ) : el.type === "board" ? (
+        <div className="flex h-full w-full flex-col overflow-hidden">
+          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-3 text-center">
+            <Icon.BoardIcon className="text-3xl text-primary" />
+            <span className="line-clamp-2 text-xs font-bold text-slate-700">{el.title || "Board"}</span>
+            <span className="text-[10px] font-bold text-slate-400">Double-click to open</span>
+          </div>
         </div>
       ) : (
         <div className="grid h-full place-items-center text-slate-400">

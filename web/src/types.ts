@@ -30,7 +30,8 @@ export type Element =
   | (Base & { type: "link"; url: string; title?: string; description?: string; image?: string; hideImage?: boolean; hideCaption?: boolean })
   | (Base & { type: "file"; name: string; downloadUrl: string; size: number })
   | (Base & { type: "embed"; src: string })
-  | (Base & { type: "todo"; title?: string; items: TodoItem[] });
+  | (Base & { type: "todo"; title?: string; items: TodoItem[] })
+  | (Base & { type: "board"; boardId: string; title?: string });
 
 export interface TodoItem {
   id: string;

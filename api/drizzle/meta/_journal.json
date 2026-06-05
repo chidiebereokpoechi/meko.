@@ -43,6 +43,13 @@
       "when": 1780641788144,
       "tag": "0005_clear_carnage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780668974069,
+      "tag": "0006_yielding_spiral",
+      "breakpoints": true
     }
   ]
 }

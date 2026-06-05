@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { logout, refresh } from "./lib/auth.ts";
 import { api } from "./lib/api.ts";
-import type { Board, Workspace } from "./types.ts";
+import type { Workspace } from "./types.ts";
 import { Login } from "./ui/Login.tsx";
 import { Boards } from "./ui/Boards.tsx";
 import { Canvas, type BoardControls } from "./ui/Canvas.tsx";
@@ -14,12 +14,13 @@ import { Toaster, toast } from "./ui/kit/index.ts";
 
 type WorkspaceWithRole = Workspace & { role: string };
 type Phase = "loading" | "login" | "ready";
+type Crumb = { id: string; title: string };
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [workspaces, setWorkspaces] = useState<WorkspaceWithRole[]>([]);
   const [controls, setControls] = useState<BoardControls | null>(null);
-  const [crumb, setCrumb] = useState<string | undefined>();
+  const [crumb, setCrumb] = useState<Crumb[]>([]);
   const [newWs, setNewWs] = useState(false);
   const navigate = useNavigate();
 
@@ -93,7 +94,7 @@ function Shell({
 }: {
   workspaces: WorkspaceWithRole[];
   controls: BoardControls | null;
-  crumb?: string;
+  crumb: Crumb[];
   onLogout: () => void;
   onNewWorkspace: () => void;
 }) {
@@ -108,7 +109,8 @@ function Shell({
         activeWs={workspaceId ?? null}
         onPickWorkspace={(id) => navigate(`/w/${id}`)}
         onNewWorkspace={onNewWorkspace}
-        crumb={boardId ? crumb : undefined}
+        crumb={boardId ? crumb : []}
+        onCrumb={(id) => navigate(`/w/${workspaceId}/b/${id}`)}
         onHome={() => navigate("/")}
         onLogout={onLogout}
         undo={controls?.undo}
@@ -145,24 +147,31 @@ function BoardsRoute({ workspaces }: { workspaces: WorkspaceWithRole[] }) {
   return <Boards activeWs={workspaceId ?? null} role={role} onOpen={(b) => navigate(`/w/${b.workspaceId}/b/${b.id}`)} />;
 }
 
-// Board canvas — fetches the board's title for the breadcrumb, then mounts the live canvas.
-function BoardRoute({ setCrumb, setControls }: { setCrumb: (t?: string) => void; setControls: (c: BoardControls | null) => void }) {
+// Board canvas — fetches the board's ancestor chain for the breadcrumb, then mounts the canvas.
+function BoardRoute({ setCrumb, setControls }: { setCrumb: (c: Crumb[]) => void; setControls: (c: BoardControls | null) => void }) {
   const { workspaceId, boardId } = useParams();
   const navigate = useNavigate();
 
   useEffect(() => {
     let alive = true;
-    api<Board>(`/api/boards/${boardId}`)
-      .then((b) => alive && setCrumb(b.title))
+    api<Crumb[]>(`/api/boards/${boardId}/path`)
+      .then((chain) => alive && setCrumb(chain))
       .catch(() => {
         toast("Board not found", "error");
         navigate(`/w/${workspaceId}`, { replace: true });
       });
     return () => {
       alive = false;
-      setCrumb(undefined);
+      setCrumb([]);
     };
   }, [boardId]);
 
-  return <Canvas boardId={boardId!} onControls={setControls} />;
+  return (
+    <Canvas
+      boardId={boardId!}
+      workspaceId={workspaceId!}
+      onControls={setControls}
+      onOpenBoard={(id) => navigate(`/w/${workspaceId}/b/${id}`)}
+    />
+  );
 }
