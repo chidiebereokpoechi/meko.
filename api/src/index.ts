@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
+import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
+import { db } from "@/db/client.ts";
+import { users } from "@/db/schema.ts";
 import { config } from "@/config.ts";
 import { log } from "@/lib/logger.ts";
 import { closeDb } from "@/db/client.ts";
@@ -32,7 +35,21 @@ interface WsData {
   boardId: string;
   userId: string | null;
   canEdit: boolean;
+  name: string;
+  color: string;
   authTimer: ReturnType<typeof setTimeout> | null;
+}
+
+// Deterministic per-user cursor colour from the userId — server-owned so a client can't spoof
+// another user's identity or colour. 12 distinct, legible hues.
+const PRESENCE_COLORS = [
+  "#6e24ff", "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
+  "#0ea5e9", "#3b82f6", "#8b5cf6", "#ec4899", "#f43f5e", "#10b981",
+];
+function colorForUser(userId: string): string {
+  let h = 0;
+  for (let i = 0; i < userId.length; i++) h = (h * 31 + userId.charCodeAt(i)) >>> 0;
+  return PRESENCE_COLORS[h % PRESENCE_COLORS.length]!;
 }
 
 roomManager.start();
@@ -103,6 +120,8 @@ const app = new Elysia()
         boardId,
         userId: null,
         canEdit: false,
+        name: "",
+        color: "#6e24ff",
         // §5g step 4: close if no auth message arrives within 5s.
         authTimer: setTimeout(() => ws.close(4401, "auth timeout"), 5000),
       };
@@ -134,9 +153,27 @@ const app = new Elysia()
           }
           state.userId = userId;
           state.canEdit = access === "edit";
+          // Server owns presence identity: name from the DB, colour derived from the userId.
+          const [u] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.id, userId)).limit(1);
+          state.name = u?.displayName ?? "Someone";
+          state.color = colorForUser(userId);
           if (state.authTimer) clearTimeout(state.authTimer);
           state.authTimer = null;
-          await roomManager.join(state.boardId, makeClient(ws, state));
+          const client = makeClient(ws, state);
+          await roomManager.join(state.boardId, client);
+          // Tell the client its own identity so it can exclude itself (and its other tabs) from presence.
+          client.sendText(JSON.stringify({ type: "hello", userId }));
+          return;
+        }
+        if (msg?.type === "presence") {
+          if (!state.userId) return; // presence only after auth
+          const cur = (msg as { cursor?: { x?: unknown; y?: unknown } }).cursor;
+          if (!cur || typeof cur.x !== "number" || typeof cur.y !== "number") return;
+          roomManager.relayPresence(
+            state.boardId,
+            { type: "presence", clientId: state.id, userId: state.userId, name: state.name, color: state.color, cursor: { x: cur.x, y: cur.y } },
+            state.id,
+          );
         }
         return;
       }
@@ -170,6 +207,7 @@ function makeClient(ws: { raw: { send: (d: Uint8Array | string) => void } }, sta
   return {
     id: state.id,
     sendBinary: (data) => ws.raw.send(data),
+    sendText: (data) => ws.raw.send(data),
     sendError: (code, message) => ws.raw.send(JSON.stringify({ type: "error", code, message })),
   };
 }

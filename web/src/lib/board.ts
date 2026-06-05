@@ -5,6 +5,14 @@ import type { Element } from "../types.ts";
 
 export type ConnStatus = "connecting" | "online" | "offline";
 
+export interface Peer {
+  clientId: string;
+  userId: string;
+  name: string;
+  color: string;
+  cursor: { x: number; y: number };
+}
+
 // Live board connection. Matches the server WS protocol (src/index.ts): fetch a single-use ticket,
 // open the socket, send {type:"auth",ticket} first, then exchange raw Yjs binary updates. The
 // server sends full board state on join; we apply incoming updates with origin "remote" so our own
@@ -16,6 +24,12 @@ export class BoardConnection {
   // UndoManager (default trackedOrigins = null/local) ignores, so undo never reverts peers' work.
   readonly undoMgr = new Y.UndoManager(this.elements);
   onStatus?: (s: ConnStatus) => void;
+
+  // Live peer cursors, keyed by server-assigned clientId. Ephemeral — never persisted.
+  readonly peers = new Map<string, Peer>();
+  onPresence?: (peers: Peer[]) => void;
+  private lastCursorSent = 0;
+  private selfUserId: string | null = null;
 
   undo() {
     this.undoMgr.undo();
@@ -49,7 +63,10 @@ export class BoardConnection {
 
       ws.onopen = () => ws.send(JSON.stringify({ type: "auth", ticket }));
       ws.onmessage = (ev) => {
-        if (typeof ev.data === "string") return; // control/error frames are JSON
+        if (typeof ev.data === "string") {
+          this.onControlFrame(ev.data);
+          return;
+        }
         Y.applyUpdate(this.doc, new Uint8Array(ev.data as ArrayBuffer), "remote");
         if (!this.synced) {
           this.synced = true;
@@ -61,12 +78,52 @@ export class BoardConnection {
       ws.onerror = () => ws.close();
       ws.onclose = () => {
         this.onStatus?.("offline");
+        if (this.peers.size) {
+          this.peers.clear();
+          this.onPresence?.([]);
+        }
         if (!this.closed) setTimeout(() => void this.connect(), 1500);
       };
     } catch {
       this.onStatus?.("offline");
       if (!this.closed) setTimeout(() => void this.connect(), 1500);
     }
+  }
+
+  // Parse a JSON control frame: error, or peer presence/leave. Unknown frames are ignored.
+  private onControlFrame(raw: string): void {
+    let m: { type?: string; clientId?: string } & Partial<Peer>;
+    try {
+      m = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (m.type === "hello") {
+      this.selfUserId = m.userId ?? null;
+      return;
+    }
+    if (m.type === "presence" && m.clientId && m.cursor) {
+      if (m.userId && m.userId === this.selfUserId) return; // don't show our own cursor (any tab)
+      this.peers.set(m.clientId, {
+        clientId: m.clientId,
+        userId: m.userId ?? "",
+        name: m.name ?? "Someone",
+        color: m.color ?? "#6e24ff",
+        cursor: m.cursor,
+      });
+      this.onPresence?.([...this.peers.values()]);
+    } else if (m.type === "presence-leave" && m.clientId) {
+      if (this.peers.delete(m.clientId)) this.onPresence?.([...this.peers.values()]);
+    }
+  }
+
+  // Broadcast this client's cursor in world coordinates. Throttled to ~30fps to bound WS traffic.
+  sendCursor(x: number, y: number): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (now - this.lastCursorSent < 33) return;
+    this.lastCursorSent = now;
+    this.ws.send(JSON.stringify({ type: "presence", cursor: { x, y } }));
   }
 
   destroy(): void {

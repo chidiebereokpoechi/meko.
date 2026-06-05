@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { BoardConnection, type ConnStatus } from "../lib/board.ts";
+import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { unfurlLink } from "../lib/links.ts";
@@ -60,11 +60,13 @@ export function Canvas({
   const marqueeRef = useRef<{ x0: number; y0: number } | null>(null);
   const spaceRef = useRef(false); // space held → drag pans instead of marquees
   const [captionEditing, setCaptionEditing] = useState(false);
+  const [peers, setPeers] = useState<Peer[]>([]);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
     connRef.current = c;
     c.onStatus = setStatus;
+    c.onPresence = setPeers;
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
 
@@ -333,6 +335,8 @@ export function Canvas({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onViewportPointerMove = (e: React.PointerEvent) => {
+    const w = toWorld(e.clientX, e.clientY);
+    connRef.current?.sendCursor(w.x, w.y);
     const p = panRef.current;
     if (p) {
       setViewClamped((v) => ({ ...v, x: p.px + e.clientX - p.cx, y: p.py + e.clientY - p.cy }));
@@ -785,9 +789,33 @@ export function Canvas({
                 onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
               />
             ))}
+            {peers.map((p) => (
+              <PeerCursor key={p.clientId} peer={p} zoom={view.zoom} />
+            ))}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// A remote peer's live cursor, positioned in world coords but counter-scaled so it stays a
+// constant size on screen at any zoom.
+function PeerCursor({ peer, zoom }: { peer: Peer; zoom: number }) {
+  return (
+    <div
+      className="pointer-events-none absolute left-0 top-0 z-50"
+      style={{ transform: `translate(${peer.cursor.x}px, ${peer.cursor.y}px) scale(${1 / zoom})`, transformOrigin: "top left" }}
+    >
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" className="drop-shadow">
+        <path d="M2 2l6 14 2.5-5.5L16 8 2 2z" fill={peer.color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
+      <span
+        className="ml-3 inline-block whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-bold text-white shadow"
+        style={{ background: peer.color }}
+      >
+        {peer.name}
+      </span>
     </div>
   );
 }
