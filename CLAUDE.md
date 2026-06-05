@@ -149,6 +149,13 @@ Building per v4 §15.
   60/hr/user, 24h cache in `unfurls` (stores `resolvedIp` so reads never re-resolve, §7e).
   `SsrfError` → 422.
 
-Later phases (sharing/permissions extras, exports, polish) are tracked in the plan and not yet built.
+- **Phase 6 (sharing & permissions) — done.** Tokenised share links (`share_links`, hash-stored,
+  redeem upserts a `board_permissions` row) and workspace invites (`invites`, accept adds a
+  member; create gated to owner/admin + 20/day/user). Audit trail (`src/lib/audit.ts`) on
+  share/invite/board-delete. Internal-only dead-letter endpoint
+  (`GET /api/internal/jobs/dead`, gated by `MEKO_INTERNAL_TOKEN`, 404 when unset, §12n). Hourly
+  `cleanup` worker job prunes expired idempotency keys, refresh tokens, invites, share links.
+
+Later phases (exports, polish) are tracked in the plan and not yet built.
 When you implement a phase item, check it against the invariant it maps to above. Authenticated
 API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.

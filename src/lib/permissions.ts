@@ -42,6 +42,16 @@ export async function boardAccess(userId: string, boardId: string): Promise<Acce
 // Guard helpers: throw a tagged error the route layer maps to 403. Logs the denial (§3g).
 export class ForbiddenError extends Error {}
 
+// Require the user to hold one of `roles` in the workspace (e.g. owner/admin to invite).
+export async function requireWorkspaceRole(userId: string, workspaceId: string, roles: string[]): Promise<string> {
+  const role = await workspaceRole(userId, workspaceId);
+  if (!role || !roles.includes(role)) {
+    securityEvent("perm.denied", { userId, workspaceId, need: roles, have: role });
+    throw new ForbiddenError("FORBIDDEN");
+  }
+  return role;
+}
+
 export async function requireBoardAccess(userId: string, boardId: string, need: "view" | "edit"): Promise<Access> {
   const access = await boardAccess(userId, boardId);
   const ok = need === "view" ? access === "view" || access === "edit" : access === "edit";

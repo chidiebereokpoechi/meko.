@@ -29,6 +29,13 @@
       "when": 1780640778422,
       "tag": "0003_light_kid_colt",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780641122701,
+      "tag": "0004_true_jackal",
+      "breakpoints": true
     }
   ]
 }

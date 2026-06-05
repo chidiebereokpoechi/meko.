@@ -5,6 +5,7 @@ import { boards, comments, users } from "@/db/schema.ts";
 import { requireAuth } from "@/auth/middleware.ts";
 import { requireBoardAccess } from "@/lib/permissions.ts";
 import { decodeCursor, page, PAGE_SIZE } from "@/lib/pagination.ts";
+import { audit } from "@/lib/audit.ts";
 
 export const boardRoutes = new Elysia({ prefix: "/api/boards" })
   .use(requireAuth)
@@ -30,6 +31,7 @@ export const boardRoutes = new Elysia({ prefix: "/api/boards" })
   .delete("/:id", async ({ userId, params }) => {
     await requireBoardAccess(userId!, params.id, "edit");
     await db.delete(boards).where(eq(boards.id, params.id));
+    await audit("board.deleted", { userId, resource: `board:${params.id}` });
     return { ok: true };
   })
   // Comments, newest first, cursor-paginated (§13c).

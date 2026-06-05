@@ -161,6 +161,40 @@ export const idempotencyKeys = pgTable("idempotency_keys", {
   createdAt: now(),
 }, (t) => [index("idempotency_keys_expires_idx").on(t.expiresAt)]);
 
+// --- Sharing (§9) ---
+
+// Tokenised board access. The raw token is shown once at creation; only its hash is stored.
+// Redeeming (while signed in) upserts a board_permissions row for the redeemer.
+export const shareLinks = pgTable("share_links", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boardId: uuid("board_id").notNull().references(() => boards.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  level: permLevelEnum("level").notNull().default("view"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: now(),
+}, (t) => [
+  uniqueIndex("share_links_hash_idx").on(t.tokenHash),
+  index("share_links_board_idx").on(t.boardId),
+]);
+
+// Workspace invites by email. Accepting (while signed in) adds the redeemer as a member.
+export const invites = pgTable("invites", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: roleEnum("role").notNull().default("editor"),
+  tokenHash: text("token_hash").notNull(),
+  invitedBy: uuid("invited_by").notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  createdAt: now(),
+}, (t) => [
+  uniqueIndex("invites_hash_idx").on(t.tokenHash),
+  index("invites_workspace_idx").on(t.workspaceId),
+]);
+
 // --- Link unfurls (§7) ---
 
 // Cache of unfurl results keyed by URL. resolvedIp is stored at unfurl time so reads never

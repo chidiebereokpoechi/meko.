@@ -5,6 +5,8 @@ import { closeRedis } from "@/lib/redis.ts";
 import { claimJob, completeJob, enqueue, failJob, type Job } from "@/worker/queue.ts";
 import { compactBoard, findStaleBoards } from "@/realtime/persistence.ts";
 import { processUpload } from "@/media/process.ts";
+import { sql } from "drizzle-orm";
+import { db } from "@/db/client.ts";
 
 // Job handlers keyed by type. Export/email land in later phases.
 const handlers: Record<string, (payload: any) => Promise<void>> = {
@@ -13,6 +15,13 @@ const handlers: Record<string, (payload: any) => Promise<void>> = {
   },
   async "process-upload"({ mediaId }: { mediaId: string }) {
     await processUpload(mediaId);
+  },
+  // Reclaim expired ephemera so high-churn tables don't accumulate dead rows (§13a).
+  async cleanup() {
+    await db.execute(sql`DELETE FROM idempotency_keys WHERE expires_at < now()`);
+    await db.execute(sql`DELETE FROM refresh_tokens WHERE expires_at < now()`);
+    await db.execute(sql`DELETE FROM invites WHERE expires_at < now() AND accepted_at IS NULL`);
+    await db.execute(sql`DELETE FROM share_links WHERE expires_at IS NOT NULL AND expires_at < now()`);
   },
 };
 
@@ -55,6 +64,8 @@ async function periodicCompaction(): Promise<void> {
     const boards = await findStaleBoards();
     for (const boardId of boards) await enqueue("compact", { boardId });
     if (boards.length) log.info({ action: "compact.scheduled", count: boards.length }, "scheduled compaction");
+    // Hourly expired-ephemera sweep (§13a / idempotency-key cleanup open question).
+    await enqueue("cleanup", {});
   } catch (err) {
     log.error({ err, action: "compact.schedule_fail" }, "periodic compaction scan failed");
   }

@@ -14,6 +14,8 @@ import { workspaceRoutes } from "@/http/routes/workspaces.ts";
 import { boardRoutes } from "@/http/routes/boards.ts";
 import { mediaRoutes } from "@/http/routes/media.ts";
 import { linkRoutes } from "@/http/routes/links.ts";
+import { shareRoutes } from "@/http/routes/sharing.ts";
+import { internalRoutes } from "@/http/routes/internal.ts";
 import { SsrfError } from "@/lib/ssrf.ts";
 import { redeemWsTicket } from "@/auth/ws-ticket.ts";
 import { boardAccess, ForbiddenError } from "@/lib/permissions.ts";
@@ -80,6 +82,8 @@ const app = new Elysia()
   .use(boardRoutes)
   .use(mediaRoutes)
   .use(linkRoutes)
+  .use(shareRoutes)
+  .use(internalRoutes)
   // WebSocket board endpoint. Origin is validated at the upgrade; auth is by ticket message.
   .ws("/boards/:boardId", {
     // §5g step 1: reject cross-origin upgrades — the only CSRF control browsers enforce on WS.

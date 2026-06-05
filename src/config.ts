@@ -46,6 +46,10 @@ const Env = z.object({
   S3_ACCESS_KEY: z.string().default(""),
   S3_SECRET_KEY: z.string().default(""),
   MEKO_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(25 * 1024 * 1024),
+
+  // Shared secret gating internal-only ops endpoints (dead-letter inspection). Empty ⇒ endpoints
+  // return 404, hiding their existence.
+  MEKO_INTERNAL_TOKEN: z.string().default(""),
 });
 
 const parsed = Env.safeParse(process.env);
