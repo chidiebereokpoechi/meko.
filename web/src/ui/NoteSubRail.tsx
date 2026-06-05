@@ -46,6 +46,7 @@ export function NoteSubRail({
   deleteRef,
   deleteActive,
   onDone,
+  onBack,
   onExec,
   onFill,
   onStrip,
@@ -56,6 +57,9 @@ export function NoteSubRail({
   deleteRef?: React.Ref<HTMLDivElement>;
   deleteActive?: boolean;
   onDone: () => void;
+  // Editing → "Back" returns to the element's selection rail; selection → "Done" exits to the
+  // main tool rail.
+  onBack: () => void;
   onExec: (command: string, value?: string) => void;
   onFill: (hex: string) => void;
   onStrip: (hex: string | null) => void;
@@ -95,7 +99,7 @@ export function NoteSubRail({
 
   return (
     <nav data-note-rail className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
-      <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
+      <RailBtn label={editing ? "Back" : "Done"} icon={<Icon.ArrowLeftIcon />} onClick={editing ? onBack : onDone} />
 
       {editing ? (
         <>

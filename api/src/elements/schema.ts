@@ -45,6 +45,9 @@ export const ImageElement = z
     // Durable reference to the uploaded media; src is a presigned URL that expires, so clients
     // re-resolve via GET /api/media/:mediaId on load. Optional for externally-sourced images.
     mediaId: z.string().uuid().optional(),
+    // Optional editable caption beneath the image (sanitised HTML), toggled by showCaption.
+    caption: z.string().max(2000).optional(),
+    showCaption: z.boolean().optional(),
   })
   .strict();
 export const LinkElement = z

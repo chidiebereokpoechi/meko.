@@ -3,11 +3,10 @@ import type { Element } from "../types.ts";
 import { Icon } from "./kit/index.ts";
 import { Popover, RailBtn, StripPicker } from "./NoteSubRail.tsx";
 
-type Link = Extract<Element, { type: "link" }>;
+type Img = Extract<Element, { type: "image" }>;
 
-// Contextual rail for a selected link: toggle preview image, toggle caption, change colour
-// (background + top strip, same as a note). Reuses the shared rail primitives.
-export function LinkSubRail({
+// Contextual rail for a selected image: top-strip colour + toggle an editable caption beneath it.
+export function ImageSubRail({
   el,
   deleteRef,
   deleteActive,
@@ -16,11 +15,11 @@ export function LinkSubRail({
   onStrip,
   onDelete,
 }: {
-  el: Link;
+  el: Img;
   deleteRef?: React.Ref<HTMLDivElement>;
   deleteActive?: boolean;
   onDone: () => void;
-  onPatch: (p: Partial<Link>) => void;
+  onPatch: (p: Partial<Img>) => void;
   onStrip: (hex: string | null) => void;
   onDelete: () => void;
 }) {
@@ -47,7 +46,7 @@ export function LinkSubRail({
           label="Color"
           active={colorOpen}
           icon={
-            <span className="flex h-5 w-5 flex-col overflow-hidden rounded-md ring-2 ring-inset ring-slate-300 bg-white">
+            <span className="flex h-5 w-5 flex-col overflow-hidden rounded-md bg-white ring-2 ring-inset ring-slate-300">
               <span className="h-1.5 shrink-0" style={{ background: el.style?.strip ?? "#cbd5e1" }} />
             </span>
           }
@@ -55,8 +54,7 @@ export function LinkSubRail({
         />
       </div>
 
-      {el.image && <RailBtn label="Preview" active={!el.hideImage} icon={<Icon.ImageIcon />} onClick={() => onPatch({ hideImage: !el.hideImage })} />}
-      {el.description && <RailBtn label="Caption" active={!el.hideCaption} icon={<Icon.AlignIcon />} onClick={() => onPatch({ hideCaption: !el.hideCaption })} />}
+      <RailBtn label="Caption" active={!!el.showCaption} icon={<Icon.AlignIcon />} onClick={() => onPatch({ showCaption: !el.showCaption })} />
 
       <span className="flex-1" />
       <div ref={deleteRef} className="flex w-full justify-center">

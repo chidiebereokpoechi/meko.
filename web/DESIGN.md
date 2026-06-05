@@ -54,6 +54,14 @@ Three zones:
   props) runs before persisting to Yjs AND before rendering. Never inject unsanitised innerHTML.
   (Per-note last-write-wins; true char-merged rich text would need a Y.Xml binding — deferred.)
 
+## Element conventions
+
+- **Every element type has its own contextual sub-rail** (note, link, image, …). When adding a new
+  element type, build its `*SubRail` reusing the shared rail primitives exported from `NoteSubRail`
+  (`RailBtn`, `Popover`, `ColorTabs`, `StripPicker`).
+- **Every element's sub-rail includes at least a Top-strip colour tool; named color not TopStrip** (`StripPicker` in a
+  `Popover`), wired to `style.strip`. Other colour/format tools are per-type.
+
 ## Kit reference
 
 - `Button` — `variant`: `primary` (default) | `ghost` | `tool`; `loading` shows a spinner.
