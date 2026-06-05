@@ -9,9 +9,13 @@ import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
 import { LinkSubRail } from "./LinkSubRail.tsx";
 import { ImageSubRail } from "./ImageSubRail.tsx";
+import { CommonSubRail } from "./CommonSubRail.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
 import { sanitizeHtml } from "../lib/sanitize.ts";
+
+const WORLD_W = 4000;
+const WORLD_H = 3000;
 
 export interface BoardControls {
   undo: () => void;
@@ -30,17 +34,20 @@ export function Canvas({
 }) {
   const connRef = useRef<BoardConnection | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const surfaceRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null); // the transformed "world"
+  const viewportRef = useRef<HTMLDivElement>(null); // the clipping viewport
   const deleteRef = useRef<HTMLDivElement>(null);
   const dropCoords = useRef<{ x: number; y: number } | null>(null);
   const editorRef = useRef<ActiveEditor | null>(null);
   const savedRange = useRef<Range | null>(null);
+  const panRef = useRef<{ cx: number; cy: number; px: number; py: number } | null>(null);
   const [, setTick] = useState(0);
+  // Pan offset (screen px) + zoom applied to the world via CSS transform.
+  const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [busy, setBusy] = useState(false);
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overDelete, setOverDelete] = useState(false);
@@ -48,6 +55,10 @@ export function Canvas({
     null,
   );
   const [dragOver, setDragOver] = useState(false);
+  // Marquee selection rectangle in screen coords while dragging empty canvas.
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const marqueeRef = useRef<{ x0: number; y0: number } | null>(null);
+  const spaceRef = useRef(false); // space held → drag pans instead of marquees
   const [captionEditing, setCaptionEditing] = useState(false);
 
   useEffect(() => {
@@ -85,7 +96,11 @@ export function Canvas({
   const elements: Element[] = connRef.current
     ? Array.from(connRef.current.elements.values())
     : [];
+  // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
+  // select many.
+  const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
   const selected = elements.find((e) => e.id === selectedId) ?? null;
+  const selectId = (id: string) => setSelectedIds([id]);
 
   useEffect(() => {
     for (const el of elements) {
@@ -103,13 +118,38 @@ export function Canvas({
     const cur = c?.elements.get(id);
     if (c && cur) c.elements.set(id, { ...cur, ...p } as Element);
   };
+
+  // Move an element to (x,y). If it's part of a multi-selection, shift every selected element by
+  // the same delta in one transaction (group move, single undo step).
+  const moveElement = (id: string, x: number, y: number) => {
+    const c = connRef.current;
+    const cur = c?.elements.get(id);
+    if (!c || !cur) return;
+    if (selectedIds.length > 1 && selectedIds.includes(id)) {
+      const dx = x - cur.x;
+      const dy = y - cur.y;
+      c.doc.transact(() => {
+        for (const sid of selectedIds) {
+          const e = c.elements.get(sid);
+          if (e) c.elements.set(sid, { ...e, x: e.x + dx, y: e.y + dy });
+        }
+      });
+    } else {
+      patch(id, { x, y });
+    }
+  };
   const remove = (id: string) => {
     connRef.current?.elements.delete(id);
-    setSelectedId((s) => (s === id ? null : s));
+    setSelectedIds((ids) => ids.filter((x) => x !== id));
     setEditingId((s) => (s === id ? null : s));
   };
+  const removeMany = (ids: string[]) => {
+    ids.forEach((id) => connRef.current?.elements.delete(id));
+    setSelectedIds([]);
+    setEditingId(null);
+  };
   const deselect = () => {
-    setSelectedId(null);
+    setSelectedIds([]);
     setEditingId(null);
     setCaptionEditing(false);
   };
@@ -142,14 +182,14 @@ export function Canvas({
           ae.isContentEditable)
       )
         return;
-      if (selectedId) {
+      if (selectedIds.length) {
         e.preventDefault();
-        remove(selectedId);
+        removeMany(selectedIds);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, editingId]);
+  }, [selectedIds, editingId]);
 
   // Undo/redo hotkeys: ⌘/Ctrl+Z, and ⌘/Ctrl+Y or ⇧⌘/Ctrl+Z. Skipped while typing so the browser
   // handles in-note text undo instead.
@@ -209,14 +249,117 @@ export function Canvas({
     return () => document.removeEventListener("selectionchange", onSel);
   }, []);
 
+  // Screen point → world coords. The world's bounding rect already reflects the pan/zoom transform,
+  // so dividing the offset by zoom yields world coordinates.
+  const toWorld = (clientX: number, clientY: number) => {
+    const r = surfaceRef.current?.getBoundingClientRect();
+    if (!r) return { x: 0, y: 0 };
+    return { x: (clientX - r.left) / view.zoom, y: (clientY - r.top) / view.zoom };
+  };
   const viewportCentre = () => {
-    const s = scrollRef.current;
-    return s
-      ? {
-          x: s.scrollLeft + s.clientWidth / 2 - 110,
-          y: s.scrollTop + s.clientHeight / 2 - 60,
-        }
-      : { x: 200, y: 200 };
+    const r = viewportRef.current?.getBoundingClientRect();
+    if (!r) return { x: 200, y: 200 };
+    const c = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    return { x: c.x - 110, y: c.y - 60 };
+  };
+
+  // --- Pan & zoom ---
+  const clampZoom = (z: number) => Math.min(3, Math.max(0.2, z));
+  // Clamp pan so the world can't be dragged out of view: world edges stay flush to the viewport;
+  // when the world is smaller than the viewport (zoomed out) it's centred.
+  const clampView = (v: { x: number; y: number; zoom: number }) => {
+    const vp = viewportRef.current?.getBoundingClientRect();
+    if (!vp) return v;
+    const axis = (pos: number, world: number, viewSize: number) =>
+      world <= viewSize ? (viewSize - world) / 2 : Math.min(0, Math.max(viewSize - world, pos));
+    return { zoom: v.zoom, x: axis(v.x, WORLD_W * v.zoom, vp.width), y: axis(v.y, WORLD_H * v.zoom, vp.height) };
+  };
+  const setViewClamped = (fn: (v: typeof view) => typeof view) => setView((v) => clampView(fn(v)));
+
+  // Zoom toward a screen point, keeping that point fixed in world space.
+  const zoomAt = (clientX: number, clientY: number, factor: number) => {
+    const r = viewportRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setViewClamped((v) => {
+      const z = clampZoom(v.zoom * factor);
+      const k = z / v.zoom;
+      const px = clientX - r.left;
+      const py = clientY - r.top;
+      return { zoom: z, x: px - (px - v.x) * k, y: py - (py - v.y) * k };
+    });
+  };
+  const setZoom = (z: number) => {
+    const r = viewportRef.current?.getBoundingClientRect();
+    if (r) zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(z) / view.zoom);
+  };
+
+  // Wheel: ⌘/Ctrl (or pinch) zooms toward the cursor; otherwise pans. Native listener so we can
+  // preventDefault (React's onWheel is passive).
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+      else setViewClamped((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+    };
+    vp.addEventListener("wheel", onWheel, { passive: false });
+    return () => vp.removeEventListener("wheel", onWheel);
+  }, [view.zoom]);
+
+  // Track Space to switch empty-drag from marquee to pan.
+  useEffect(() => {
+    const set = (down: boolean) => (e: KeyboardEvent) => {
+      if (e.code === "Space") spaceRef.current = down;
+    };
+    const d = set(true);
+    const u = set(false);
+    window.addEventListener("keydown", d);
+    window.addEventListener("keyup", u);
+    return () => {
+      window.removeEventListener("keydown", d);
+      window.removeEventListener("keyup", u);
+    };
+  }, []);
+
+  // Empty-canvas drag: Space/middle-button pans; otherwise draws a marquee selection.
+  const onViewportPointerDown = (e: React.PointerEvent) => {
+    if (spaceRef.current || e.button === 1) {
+      panRef.current = { cx: e.clientX, cy: e.clientY, px: view.x, py: view.y };
+    } else {
+      marqueeRef.current = { x0: e.clientX, y0: e.clientY };
+      setMarquee({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY });
+    }
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onViewportPointerMove = (e: React.PointerEvent) => {
+    const p = panRef.current;
+    if (p) {
+      setViewClamped((v) => ({ ...v, x: p.px + e.clientX - p.cx, y: p.py + e.clientY - p.cy }));
+      return;
+    }
+    const m = marqueeRef.current;
+    if (m) setMarquee({ x0: m.x0, y0: m.y0, x1: e.clientX, y1: e.clientY });
+  };
+  const onViewportPointerUp = () => {
+    panRef.current = null;
+    const m = marqueeRef.current;
+    marqueeRef.current = null;
+    if (!m) return;
+    if (!marquee) return;
+    const moved = Math.abs(marquee.x1 - marquee.x0) + Math.abs(marquee.y1 - marquee.y0) > 4;
+    if (!moved) {
+      deselect(); // a click on empty canvas
+    } else {
+      // Select elements intersecting the marquee (world coords).
+      const a = toWorld(Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1));
+      const b = toWorld(Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1));
+      const hits = elements.filter((el) => el.x < b.x && el.x + el.w > a.x && el.y < b.y && el.y + el.h > a.y).map((el) => el.id);
+      setSelectedIds(hits);
+      setEditingId(null);
+      setCaptionEditing(false);
+    }
+    setMarquee(null);
   };
 
   const createNote = (x: number, y: number, text = "") => {
@@ -233,7 +376,7 @@ export function Canvas({
       text,
       style: { fill: "#ffffff" },
     });
-    setSelectedId(id);
+    selectId(id);
     setEditingId(null);
   };
 
@@ -262,7 +405,7 @@ export function Canvas({
         description: u.description ?? undefined,
         image: u.imageUrl ?? undefined,
       });
-      setSelectedId(id);
+      selectId(id);
     } catch {
       toast("Couldn't load that link", "error");
     }
@@ -279,7 +422,7 @@ export function Canvas({
       const id = crypto.randomUUID();
       const width = 280;
       c.elements.set(id, { id, type: "image", x, y, w: width, h: Math.max(40, Math.round((width * h) / w)), src: displayUrl, mediaId, alt: file.name });
-      setSelectedId(id);
+      selectId(id);
       toast("Image added", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Upload failed", "error");
@@ -296,7 +439,7 @@ export function Canvas({
     const width = 280;
     const id = crypto.randomUUID();
     c.elements.set(id, { id, type: "image", x, y, w: width, h: Math.max(40, Math.round((width * h) / w)), src });
-    setSelectedId(id);
+    selectId(id);
   };
 
   const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -324,9 +467,7 @@ export function Canvas({
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const rect = surfaceRef.current?.getBoundingClientRect();
-    const x = rect ? e.clientX - rect.left : 200;
-    const y = rect ? e.clientY - rect.top : 200;
+    const { x, y } = toWorld(e.clientX, e.clientY);
 
     const tool = e.dataTransfer.getData("application/x-meko-tool");
 
@@ -431,9 +572,60 @@ export function Canvas({
     patch(selected.id, { style } as Partial<Element>);
   };
 
+  // --- Multi-selection: common-settings rail applies one change across all selected elements. ---
+  const isMulti = selectedIds.length > 1;
+  const selectedEls = elements.filter((e) => selectedIds.includes(e.id));
+  const eachSelected = (fn: (e: Element) => Partial<Element> | null) => {
+    const c = connRef.current;
+    if (!c) return;
+    c.doc.transact(() => {
+      for (const id of selectedIds) {
+        const e = c.elements.get(id);
+        if (!e) continue;
+        const p = fn(e);
+        if (p) c.elements.set(id, { ...e, ...p } as Element);
+      }
+    });
+  };
+  const setStyleAll = (key: "fill" | "strip", hex: string | null) =>
+    eachSelected((e) => {
+      const style = { ...e.style };
+      if (hex) style[key] = hex;
+      else delete style[key];
+      return { style } as Partial<Element>;
+    });
+  const captionVisible = (e: Element) =>
+    e.type === "image" ? !!e.showCaption : e.type === "link" ? !e.hideCaption : false;
+  const toggleCaptionAll = () => {
+    const target = !selectedEls.every(captionVisible);
+    eachSelected((e) =>
+      e.type === "image"
+        ? ({ showCaption: target } as Partial<Element>)
+        : e.type === "link"
+          ? ({ hideCaption: !target } as Partial<Element>)
+          : null,
+    );
+  };
+  const togglePreviewAll = () => {
+    const target = !selectedEls.every((e) => e.type === "link" && !e.hideImage);
+    eachSelected((e) => (e.type === "link" ? ({ hideImage: !target } as Partial<Element>) : null));
+  };
+
   return (
     <div className="flex flex-1 overflow-hidden">
-      {isNoteSelected ? (
+      {isMulti ? (
+        <CommonSubRail
+          els={selectedEls}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onFillAll={(hex) => setStyleAll("fill", hex)}
+          onStripAll={(hex) => setStyleAll("strip", hex)}
+          onToggleCaption={toggleCaptionAll}
+          onTogglePreview={togglePreviewAll}
+          onDelete={() => removeMany(selectedIds)}
+        />
+      ) : isNoteSelected ? (
         <NoteSubRail
           el={selected}
           editing={editingId === selected.id}
@@ -488,7 +680,7 @@ export function Canvas({
           tools={createTools}
           deleteRef={deleteRef}
           deleteActive={overDelete}
-          onDelete={selectedId ? () => remove(selectedId) : undefined}
+          onDelete={selectedIds.length ? () => removeMany(selectedIds) : undefined}
         />
       )}
       <input
@@ -507,45 +699,71 @@ export function Canvas({
         onSubmit={createLink}
       />
 
-      <div className="relative flex-1 overflow-hidden">
-        <div className="absolute right-4 top-4 z-10">
+      <div
+        ref={viewportRef}
+        className="relative flex-1 touch-none overflow-hidden bg-slate-50"
+        onPointerDown={onViewportPointerDown}
+        onPointerMove={onViewportPointerMove}
+        onPointerUp={onViewportPointerUp}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!dragOver) setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
+        }}
+        onDrop={onDrop}
+      >
+        <div className="absolute right-4 top-4 z-30">
           <Badge tone={status === "online" ? "green" : "slate"}>{status}</Badge>
         </div>
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-20 m-2 rounded-xl border-2 border-dashed border-primary bg-primary/5" />
         )}
-        <div
-          ref={scrollRef}
-          className="h-full w-full overflow-auto bg-slate-50"
-          onDragOver={(e) => {
-            e.preventDefault();
-            if (!dragOver) setDragOver(true);
-          }}
-          onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node))
-              setDragOver(false);
-          }}
-          onDrop={onDrop}
-        >
+        {/* Marquee selection rectangle (screen coords). */}
+        {marquee && (
+          <div
+            className="pointer-events-none fixed z-40 rounded border-2 border-primary bg-primary/10"
+            style={{
+              left: Math.min(marquee.x0, marquee.x1),
+              top: Math.min(marquee.y0, marquee.y1),
+              width: Math.abs(marquee.x1 - marquee.x0),
+              height: Math.abs(marquee.y1 - marquee.y0),
+            }}
+          />
+        )}
+        {/* Zoom control */}
+        <div className="absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-white px-1 py-1 text-xs font-bold text-slate-500 shadow-sm" onPointerDown={(e) => e.stopPropagation()}>
+          <button className="h-6 w-6 rounded hover:bg-slate-100" onClick={() => setZoom(view.zoom / 1.2)}>
+            −
+          </button>
+          <button className="w-12 rounded hover:bg-slate-100" onClick={() => setZoom(1)}>
+            {Math.round(view.zoom * 100)}%
+          </button>
+          <button className="h-6 w-6 rounded hover:bg-slate-100" onClick={() => setZoom(view.zoom * 1.2)}>
+            +
+          </button>
+        </div>
+        <div className="h-full w-full">
           <div
             ref={surfaceRef}
-            className="relative h-[3000px] w-[4000px] bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)] [background-size:24px_24px]"
-            onPointerDown={deselect}
+            className="absolute left-0 top-0 origin-top-left bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)] [background-size:24px_24px]"
+            style={{ width: WORLD_W, height: WORLD_H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
           >
             {elements.map((el) => (
               <ElementCard
                 key={el.id}
                 el={el}
-                selected={el.id === selectedId}
+                selected={selectedIds.includes(el.id)}
                 editing={el.id === editingId}
                 imgUrl={
                   el.type === "image"
                     ? (el.mediaId && mediaUrls[el.mediaId]) || el.src
                     : undefined
                 }
-                onSelect={() => setSelectedId(el.id)}
+                onSelect={() => selectId(el.id)}
                 onEdit={() => setEditingId(el.id)}
-                onMove={(x, y) => patch(el.id, { x, y })}
+                onMove={(x, y) => moveElement(el.id, x, y)}
                 onResize={(w, h) => patch(el.id, { w, h })}
                 onText={(text) => patch(el.id, { text } as Partial<Element>)}
                 onRegister={(e) => (editorRef.current = e)}
@@ -556,10 +774,13 @@ export function Canvas({
                 }
                 onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
                 onCaptionFocus={() => {
-                  setSelectedId(el.id);
+                  selectId(el.id);
                   setCaptionEditing(true);
                 }}
                 shrink={draggingId === el.id && overDelete}
+                dragging={draggingId === el.id}
+                zoom={view.zoom}
+                toWorld={toWorld}
                 onDragMove={(x, y) => handleDragMove(el.id, x, y)}
                 onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
               />
@@ -650,6 +871,9 @@ function ElementCard({
   onCaption,
   onCaptionFocus,
   shrink,
+  dragging,
+  zoom,
+  toWorld,
   onDragMove,
   onDragRelease,
 }: {
@@ -667,56 +891,42 @@ function ElementCard({
   onCaption?: (html: string) => void;
   onCaptionFocus?: () => void;
   shrink: boolean;
+  dragging: boolean;
+  zoom: number;
+  toWorld: (cx: number, cy: number) => { x: number; y: number };
   onDragMove: (x: number, y: number) => void;
   onDragRelease: (x: number, y: number) => void;
 }) {
-  const move = useRef<{ dx: number; dy: number } | null>(null);
+  // Grab offset in WORLD coords so dragging works under any pan/zoom.
+  const grab = useRef<{ x: number; y: number } | null>(null);
   const size = useRef<{ x: number; y: number; w: number; h: number } | null>(
     null,
   );
   const justSelected = useRef(false);
   const dragged = useRef(false);
-  // While dragging we render the card position:fixed at screen coords so it escapes the canvas's
-  // overflow clip and overlays the rail. ox/oy keep the cursor at its grab point on the card.
-  const [drag, setDrag] = useState<{
-    x: number;
-    y: number;
-    ox: number;
-    oy: number;
-  } | null>(null);
   const isText = el.type === "note" || el.type === "text";
 
   const onPointerDown = (e: React.PointerEvent) => {
-    e.stopPropagation(); // don't let the canvas deselect
+    e.stopPropagation(); // don't let the canvas deselect / pan
     justSelected.current = !selected;
     dragged.current = false;
     if (!selected) onSelect();
     if (!editing) {
-      move.current = { dx: e.clientX - el.x, dy: e.clientY - el.y };
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      setDrag({
-        x: e.clientX,
-        y: e.clientY,
-        ox: e.clientX - r.left,
-        oy: e.clientY - r.top,
-      });
+      const w = toWorld(e.clientX, e.clientY);
+      grab.current = { x: w.x - el.x, y: w.y - el.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!move.current) return;
+    if (!grab.current) return;
     dragged.current = true;
-    setDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
-    onMove(
-      Math.round(e.clientX - move.current.dx),
-      Math.round(e.clientY - move.current.dy),
-    );
+    const w = toWorld(e.clientX, e.clientY);
+    onMove(Math.round(w.x - grab.current.x), Math.round(w.y - grab.current.y));
     onDragMove(e.clientX, e.clientY);
   };
   const onPointerUp = (e: React.PointerEvent) => {
-    if (move.current && dragged.current) onDragRelease(e.clientX, e.clientY);
-    move.current = null;
-    setDrag(null);
+    if (grab.current && dragged.current) onDragRelease(e.clientX, e.clientY);
+    grab.current = null;
   };
   // First click selects; a second click (already selected, no drag) enters edit mode.
   // Modifier-click (⌘/Ctrl/Alt) opens link elements.
@@ -744,14 +954,14 @@ function ElementCard({
   const lockAspect = el.type === "image"; // resize keeps the image's aspect ratio
   const onResizeMove = (e: React.PointerEvent) => {
     if (!size.current) return;
-    const w = Math.max(80, Math.round(size.current.w + e.clientX - size.current.x));
+    const w = Math.max(80, Math.round(size.current.w + (e.clientX - size.current.x) / zoom));
     if (lockAspect) {
       const aspect = size.current.w / size.current.h || 1;
       onResize(w, Math.max(40, Math.round(w / aspect)));
     } else if (autoSize) {
       onResize(w, el.h);
     } else {
-      onResize(w, Math.max(60, Math.round(size.current.h + e.clientY - size.current.y)));
+      onResize(w, Math.max(60, Math.round(size.current.h + (e.clientY - size.current.y) / zoom)));
     }
   };
   const endResize = () => (size.current = null);
@@ -776,17 +986,14 @@ function ElementCard({
       onDoubleClick={onDoubleClick}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
-      className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${drag ? "opacity-80 shadow-xl" : ""}`}
+      className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
       style={{
-        // position:fixed (drag) overrides the `absolute` class, escaping the canvas overflow clip
-        // so the card floats over the rail/top bar.
-        position: drag ? "fixed" : undefined,
-        left: drag ? drag.x - drag.ox : el.x,
-        top: drag ? drag.y - drag.oy : el.y,
+        left: el.x,
+        top: el.y,
         width: el.w,
         height: autoSize ? "auto" : el.h,
         background: isText ? (s.fill ?? "#ffffff") : "#fff",
-        zIndex: drag ? 2000 : undefined,
+        zIndex: dragging ? 1000 : undefined,
         transform: shrink ? "scale(0.4)" : undefined,
         transformOrigin: "center",
         transition: "transform 0.12s ease",
