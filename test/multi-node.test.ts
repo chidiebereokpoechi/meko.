@@ -102,3 +102,14 @@ test("updates converge across two nodes", async () => {
   a.ws.close();
   b.ws.close();
 }, 20_000);
+
+// §14d: after all clients leave (room dropped + compacted), a fresh client must rebuild the board
+// from the DB — proving Postgres, not in-memory state, is the source of truth.
+test("a fresh client loads persisted state from the DB", async () => {
+  await Bun.sleep(800); // allow leave → compaction
+  const c = await connect(3102); // join sends initial state hydrated via loadDoc
+  await Bun.sleep(400);
+  expect(c.doc.getMap("root").get("greeting")).toBe("hello-from-A");
+  expect(c.doc.getMap("root").get("reply")).toBe("hi-from-B");
+  c.ws.close();
+}, 20_000);

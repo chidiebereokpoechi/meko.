@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "bench": "bun run scripts/bench.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.36.4",

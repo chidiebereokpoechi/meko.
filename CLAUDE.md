@@ -166,6 +166,13 @@ Building per v4 §15.
   symbol `exports` — it collides with the CJS `exports` global and breaks `drizzle-kit generate`;
   the symbol is `boardExports` (table name stays `exports`).
 
-Later phase (polish) tracked in the plan and not yet built.
+- **Phase 8 (polish) — done.** Multi-node §14d coverage (cross-node convergence both directions +
+  fresh-client load-from-DB after all leave), compaction/retention test (folds updates, caps
+  snapshots at `MEKO_SNAPSHOT_RETENTION`, reconstructs state), and a perf regression guard
+  (`scripts/bench.ts`, `bun run bench`) with budgets: board-load 10k elements < 2s, 1k-job
+  enqueue+drain < 60s. Dockerfiles use `--frozen-lockfile`.
+
+All v4 phases (1–8) are implemented. The full suite is `bun test` (live S3 + Chromium paths are
+opt-in/skipped); `bun run bench` is the perf gate.
 When you implement a phase item, check it against the invariant it maps to above. Authenticated
 API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.

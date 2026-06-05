@@ -7,10 +7,20 @@ Design: [meko-plan-v4.md](meko-plan-v4.md). Working agreement + invariants: [CLA
 
 ## Status
 
-**Phase 1 — collab spike (done).** Multi-node Yjs convergence, WS ticket auth, doc size gate,
-Postgres-backed persistence + compaction, `SKIP LOCKED` job worker, security headers/CSP/CORS,
-health probes, structured logging. Verified by `test/multi-node.test.ts` (two real nodes, a
-client on node A converges with a client on node B). Phases 2–8 per the plan are not yet built.
+**All v4 phases (1–8) implemented.**
+
+1. Collab spike — multi-node Yjs over Redis pub/sub, WS ticket auth, doc size gate, Postgres
+   persistence + compaction, `SKIP LOCKED` worker, security headers/CSP/CORS, health, logging.
+2. Canvas core — element model (Zod), permissions, cursor pagination, board/workspace/comment CRUD.
+3. Auth hardening — argon2id signup/login, refresh rotation, Redis sliding-window rate limits.
+4. Media — S3/RustFS upload, SVG→PNG / raster→WebP transcode, presign, derivatives.
+5. Links — SSRF-safe unfurling (per-hop re-check, metadata/private-IP block), OG parse, cache.
+6. Sharing — tokenised share links, workspace invites, audit log, dead-letter ops endpoint, cleanup.
+7. Exports — internal render + isolated non-root Chromium sidecar (network-locked, host-rules).
+8. Polish — multi-node + persistence/retention tests, perf benchmark (`bun run bench`).
+
+`bun test` runs the suite (live S3 + Chromium render are opt-in/skipped). `bun run bench` is the
+performance regression gate.
 
 ## Quickstart (local dev)
 

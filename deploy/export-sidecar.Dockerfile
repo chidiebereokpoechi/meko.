@@ -7,8 +7,8 @@ RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefo
     && addgroup -S chromium && adduser -S chromium -G chromium
 
 WORKDIR /app
-COPY package.json ./
-RUN bun install
+COPY package.json bun.lockb ./
+RUN bun install --frozen-lockfile
 COPY . .
 RUN chown -R chromium:chromium /app
 USER chromium
