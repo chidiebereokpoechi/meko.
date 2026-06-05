@@ -30,4 +30,6 @@ export const PaintIcon = svg(<><circle cx="12" cy="12" r="8" /><circle cx="12" c
 export const BulletListIcon = svg(<><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" fill="currentColor" /><circle cx="4.5" cy="12" r="1" fill="currentColor" /><circle cx="4.5" cy="18" r="1" fill="currentColor" /></>);
 export const NumberListIcon = svg(<path d="M10 6h10M10 12h10M10 18h10M4 5v3M3 12h2l-2 3h2" />);
 export const LinkToolIcon = LinkIcon;
+export const UsersIcon = svg(<><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="8" r="4" /><path d="M22 20v-2a4 4 0 0 0-3-3.87M16 4.13a4 4 0 0 1 0 7.75" /></>);
+export const CheckIcon = svg(<path d="m5 13 4 4L19 7" />);
 

@@ -3,6 +3,7 @@ import { api } from "../lib/api.ts";
 import type { Board } from "../types.ts";
 import { Icon, toast } from "./kit/index.ts";
 import { NameModal } from "./NameModal.tsx";
+import { MembersModal } from "./MembersModal.tsx";
 
 // Palette for board tiles, picked deterministically from the board id (Milanote-style).
 const PALETTE = ["#d9c27e", "#d97e9b", "#7e9bd9", "#86c08a", "#c0867e", "#9b86c0", "#7ec0b8"];
@@ -12,7 +13,9 @@ export function Boards({ activeWs, role, onOpen }: { activeWs: string | null; ro
   const [boards, setBoards] = useState<Board[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const canEdit = role === "owner" || role === "admin" || role === "editor";
+  const canManage = role === "owner" || role === "admin";
 
   useEffect(() => {
     if (!activeWs) {
@@ -30,6 +33,15 @@ export function Boards({ activeWs, role, onOpen }: { activeWs: string | null; ro
 
   return (
     <main className="flex-1 overflow-auto p-10">
+      <div className="mb-8 flex items-center justify-between">
+        <h1 className="heading text-lg text-slate-700">Boards</h1>
+        <button
+          onClick={() => setShowMembers(true)}
+          className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100"
+        >
+          <Icon.UsersIcon className="text-base" /> Members
+        </button>
+      </div>
       <div className="flex flex-wrap gap-x-6 gap-y-8">
         {boards.map((b) => (
           <Tile key={b.id} board={b} viewOnly={!canEdit} onOpen={() => onOpen(b)} />
@@ -56,6 +68,8 @@ export function Boards({ activeWs, role, onOpen }: { activeWs: string | null; ro
           onOpen(b);
         }}
       />
+
+      <MembersModal open={showMembers} onClose={() => setShowMembers(false)} workspaceId={activeWs} canManage={canManage} />
     </main>
   );
 }

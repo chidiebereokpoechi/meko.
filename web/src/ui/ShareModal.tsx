@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Icon, Modal, TextField, toast } from "./kit/index.ts";
+import { Button, Icon, Modal, Select, TextField, toast } from "./kit/index.ts";
 import {
   type InviteRole,
   type ShareLevel,
@@ -107,18 +107,12 @@ export function ShareModal({
         <div className="flex gap-2">
           <Segment value={level} onChange={setLevel} options={[{ v: "view", label: "Can view" }, { v: "edit", label: "Can edit" }]} />
         </div>
-        <label className="grid gap-1.5">
-          <span className="text-xs text-slate-400">Expires</span>
-          <select
-            value={expiryIdx}
-            onChange={(e) => setExpiryIdx(Number(e.target.value))}
-            className="rounded-lg border-2 border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/20"
-          >
-            {EXPIRY.map((o, i) => (
-              <option key={o.label} value={i}>{o.label}</option>
-            ))}
-          </select>
-        </label>
+        <Select
+          label="Expires"
+          value={String(expiryIdx)}
+          options={EXPIRY.map((o, i) => ({ value: String(i), label: o.label }))}
+          onChange={(v) => setExpiryIdx(Number(v))}
+        />
         <Button onClick={create} loading={creating}>
           <Icon.ShareIcon className="text-base" /> Create link
         </Button>
@@ -151,17 +145,15 @@ export function ShareModal({
         <div className="grid gap-2 border-t-2 border-slate-100 pt-3">
           <span className="text-xs font-bold text-slate-400">Invite to workspace</span>
           <TextField label="Email" name="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <div className="flex items-center gap-2">
-            <select
+          <div className="flex items-end gap-2">
+            <Select
+              name="share-invite-role"
               value={role}
-              onChange={(e) => setRole(e.target.value as InviteRole)}
-              className="rounded-lg border-2 border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/20"
-            >
-              <option value="admin">Admin</option>
-              <option value="editor">Editor</option>
-              <option value="viewer">Viewer</option>
-            </select>
-            <Button className="flex-1" onClick={invite} loading={inviting} disabled={!email.trim()}>Create invite</Button>
+              options={[{ value: "admin", label: "Admin" }, { value: "editor", label: "Editor" }, { value: "viewer", label: "Viewer" }]}
+              onChange={setRole}
+              className="w-28"
+            />
+            <Button className="flex-1 border-2 border-transparent" onClick={invite} loading={inviting} disabled={!email.trim()}>Create invite</Button>
           </div>
           {inviteLink && (
             <div className="flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-slate-50 p-1">
