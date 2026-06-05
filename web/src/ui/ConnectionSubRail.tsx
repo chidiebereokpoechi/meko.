@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { Connection } from "../types.ts";
 import { ColorPicker, Icon } from "./kit/index.ts";
 import { Popover, RailBtn } from "./NoteSubRail.tsx";
+
+// Structural subset shared by connections and standalone lines.
+type EdgeStyle = { color?: string; dashed?: boolean; weight?: number; label?: string; arrowStart?: boolean; arrowEnd?: boolean };
 
 // Line colours — a dedicated dark-leaning palette (not the note top-strip set).
 const LINE_COLORS = ["#475569", "#0f172a", "#6e24ff", "#2563eb", "#0d9488", "#16a34a", "#ca8a04", "#ea580c", "#dc2626", "#db2777"];
@@ -19,7 +21,7 @@ export function ConnectionSubRail({
   onCycleWeight,
   onDelete,
 }: {
-  conn: Connection;
+  conn: EdgeStyle;
   onDone: () => void;
   onColor: (hex: string) => void;
   onToggleStart: () => void;

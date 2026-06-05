@@ -4,7 +4,7 @@ import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
 import { api } from "../lib/api.ts";
-import type { Board, Connection, Element, TodoItem } from "../types.ts";
+import type { AnchorKey, Board, Connection, Element, LineEndpoint, LineShape, TodoItem } from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
@@ -102,6 +102,12 @@ export function Canvas({
   // Inline label editing + live endpoint reassignment for the selected connection.
   const [editingConnLabel, setEditingConnLabel] = useState<string | null>(null);
   const [connDrag, setConnDrag] = useState<{ id: string; which: "from" | "to"; pos: { x: number; y: number } } | null>(null);
+  // Standalone line tool: arm (tool clicked), in-progress draw, selection, endpoint drag, label.
+  const [armLine, setArmLine] = useState(false);
+  const [lineDraw, setLineDraw] = useState<{ a: LineEndpoint; b: LineEndpoint } | null>(null);
+  const [selectedLine, setSelectedLine] = useState<string | null>(null);
+  const [lineDrag, setLineDrag] = useState<{ id: string; which: "a" | "b"; ep: LineEndpoint } | null>(null);
+  const [editingLineLabel, setEditingLineLabel] = useState<string | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -116,6 +122,7 @@ export function Canvas({
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
     c.connections.observe(bump);
+    c.lines.observe(bump);
 
     // Mirror undo/redo availability into state; the controls publisher (below) builds the full
     // BoardControls object whenever undo state or the view changes.
@@ -134,6 +141,7 @@ export function Canvas({
       mgr.off("stack-item-popped", sync);
       c.elements.unobserve(bump);
       c.connections.unobserve(bump);
+      c.lines.unobserve(bump);
       c.destroy();
       connRef.current = null;
       onControls(null);
@@ -150,6 +158,10 @@ export function Canvas({
   // connection endpoints would miss. Use measured heights for connection geometry.
   const sizedElements = elements.map((e) => ({ ...e, h: cardHeights[e.id] ?? e.h }));
   const connLines = computeLines(sizedElements, connections, connDrag);
+  const lines: LineShape[] = connRef.current ? Array.from(connRef.current.lines.values()) : [];
+  const lineGeo = computeLineGeo(lines, sizedElements, lineDrag);
+  // Snap indicator ring while drawing or dragging an endpoint onto an element anchor.
+  const snapPt = lineDraw?.b.elementId ? { x: lineDraw.b.x, y: lineDraw.b.y } : lineDrag?.ep.elementId ? { x: lineDrag.ep.x, y: lineDrag.ep.y } : null;
   // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
   // select many.
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
@@ -182,6 +194,18 @@ export function Canvas({
     const cur = c?.connections.get(id);
     if (c && cur) c.connections.set(id, { ...cur, ...p });
   };
+
+  // --- Standalone lines ---
+  const patchLine = (id: string, p: Partial<LineShape>) => {
+    const c = connRef.current;
+    const cur = c?.lines.get(id);
+    if (c && cur) c.lines.set(id, { ...cur, ...p });
+  };
+  const removeLine = (id: string) => {
+    connRef.current?.lines.delete(id);
+    setSelectedLine((s) => (s === id ? null : s));
+  };
+  const setLineLabel = (id: string, label: string) => patchLine(id, { label: label || undefined });
 
   useEffect(() => {
     for (const el of elements) {
@@ -251,6 +275,8 @@ export function Canvas({
     setCaptionEditing(false);
     setSelectedConn(null);
     setEditingConnLabel(null);
+    setSelectedLine(null);
+    setEditingLineLabel(null);
   };
 
   const overDeleteZone = (x: number, y: number) => {
@@ -285,11 +311,17 @@ export function Canvas({
       if (selectedIds.length) {
         e.preventDefault();
         removeMany(selectedIds);
+      } else if (selectedLine) {
+        e.preventDefault();
+        removeLine(selectedLine);
+      } else if (selectedConn) {
+        e.preventDefault();
+        removeConnection(selectedConn);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedIds, editingId, readOnly]);
+  }, [selectedIds, editingId, readOnly, selectedLine, selectedConn]);
 
   // Undo/redo hotkeys: ⌘/Ctrl+Z, and ⌘/Ctrl+Y or ⇧⌘/Ctrl+Z. Skipped while typing so the browser
   // handles in-note text undo instead.
@@ -427,6 +459,51 @@ export function Canvas({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  // Snap a pointer position to the nearest element anchor (corner / edge-mid / centre), else free.
+  const snapEndpoint = (clientX: number, clientY: number): LineEndpoint => {
+    const w = toWorld(clientX, clientY);
+    const hit = nearestAnchor(w, sizedElements, 12 / view.zoom);
+    return hit ? { x: hit.pt.x, y: hit.pt.y, elementId: hit.elementId, anchor: hit.anchor } : { x: w.x, y: w.y };
+  };
+  // Drag a line endpoint: it follows the cursor and snaps/pins to an element anchor on release.
+  const startLineEndpointDrag = (id: string, which: "a" | "b", e: React.PointerEvent) => {
+    if (readOnly) return;
+    e.stopPropagation();
+    setLineDrag({ id, which, ep: snapEndpoint(e.clientX, e.clientY) });
+    const move = (ev: PointerEvent) => setLineDrag({ id, which, ep: snapEndpoint(ev.clientX, ev.clientY) });
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      patchLine(id, { [which]: snapEndpoint(ev.clientX, ev.clientY) });
+      setLineDrag(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  // Bend a line by dragging its midpoint handle (quadratic control); snaps back near straight.
+  const startLineBendDrag = (id: string, e: React.PointerEvent) => {
+    if (readOnly) return;
+    e.stopPropagation();
+    const byId = new Map(sizedElements.map((el) => [el.id, el]));
+    const apply = (clientX: number, clientY: number) => {
+      const ln = connRef.current?.lines.get(id);
+      if (!ln) return;
+      const a = resolveEnd(ln.a, byId);
+      const b = resolveEnd(ln.b, byId);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const w = toWorld(clientX, clientY);
+      const bend = { x: 2 * (w.x - mid.x), y: 2 * (w.y - mid.y) };
+      patchLine(id, { bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend });
+    };
+    const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const viewportCentre = () => {
     const r = viewportRef.current?.getBoundingClientRect();
     if (!r) return { x: 200, y: 200 };
@@ -531,6 +608,13 @@ export function Canvas({
 
   // Empty-canvas drag: Space/middle-button pans; otherwise draws a marquee selection.
   const onViewportPointerDown = (e: React.PointerEvent) => {
+    if (armLine) {
+      // Line tool armed: press = start point (snapped), drag to end.
+      const a = snapEndpoint(e.clientX, e.clientY);
+      setLineDraw({ a, b: a });
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
     if (spaceRef.current || e.button === 1) {
       panRef.current = { cx: e.clientX, cy: e.clientY, px: view.x, py: view.y };
     } else {
@@ -542,6 +626,10 @@ export function Canvas({
   const onViewportPointerMove = (e: React.PointerEvent) => {
     const w = toWorld(e.clientX, e.clientY);
     connRef.current?.sendCursor(w.x, w.y);
+    if (lineDraw) {
+      setLineDraw((d) => (d ? { a: d.a, b: snapEndpoint(e.clientX, e.clientY) } : d));
+      return;
+    }
     const p = panRef.current;
     if (p) {
       setViewClamped((v) => ({ ...v, x: p.px + e.clientX - p.cx, y: p.py + e.clientY - p.cy }));
@@ -551,6 +639,23 @@ export function Canvas({
     if (m) setMarquee({ x0: m.x0, y0: m.y0, x1: e.clientX, y1: e.clientY });
   };
   const onViewportPointerUp = () => {
+    if (lineDraw) {
+      // Commit the drawn line if it has length; otherwise discard a stray click.
+      const len = Math.hypot(lineDraw.b.x - lineDraw.a.x, lineDraw.b.y - lineDraw.a.y);
+      if (len > 8) {
+        const c = connRef.current;
+        if (c) {
+          const id = crypto.randomUUID();
+          c.lines.set(id, { id, a: lineDraw.a, b: lineDraw.b, arrowStart: false, arrowEnd: false });
+          setSelectedLine(id);
+          setSelectedIds([]);
+          setSelectedConn(null);
+        }
+      }
+      setLineDraw(null);
+      setArmLine(false);
+      return;
+    }
     panRef.current = null;
     const m = marqueeRef.current;
     marqueeRef.current = null;
@@ -763,6 +868,16 @@ export function Canvas({
       else if (tool === "link") setLinkModal({ x, y });
       else if (tool === "todo") createTodo(x, y);
       else if (tool === "board") setBoardModal({ x, y });
+      else if (tool === "line") {
+        const c = connRef.current;
+        if (c) {
+          const id = crypto.randomUUID();
+          c.lines.set(id, { id, a: { x, y }, b: { x: x + 160, y }, arrowStart: false, arrowEnd: false });
+          setSelectedLine(id);
+          setSelectedIds([]);
+          setSelectedConn(null);
+        }
+      }
       return;
     }
 
@@ -858,6 +973,18 @@ export function Canvas({
       dragKey: "board",
       onPlace: () => setBoardModal(viewportCentre()),
     },
+    {
+      key: "line",
+      label: "Line",
+      icon: <Icon.LineIcon />,
+      active: armLine,
+      dragKey: "line", // drag onto the canvas to drop a default line
+      // Click to arm, then drag on the canvas to draw (snaps to element anchors).
+      onClick: () => {
+        deselect();
+        setArmLine((a) => !a);
+      },
+    },
   ];
 
   const isNoteSelected =
@@ -935,6 +1062,21 @@ export function Canvas({
             patchConnection(selectedConn, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 });
           }}
           onDelete={() => removeConnection(selectedConn)}
+        />
+      ) : selectedLine && lines.find((l) => l.id === selectedLine) ? (
+        <ConnectionSubRail
+          conn={lines.find((l) => l.id === selectedLine)!}
+          onDone={() => setSelectedLine(null)}
+          onColor={(hex: string) => patchLine(selectedLine, { color: hex })}
+          onToggleStart={() => patchLine(selectedLine, { arrowStart: !lines.find((l) => l.id === selectedLine)!.arrowStart })}
+          onToggleEnd={() => patchLine(selectedLine, { arrowEnd: !lines.find((l) => l.id === selectedLine)!.arrowEnd })}
+          onLabel={() => setEditingLineLabel(selectedLine)}
+          onToggleDashed={() => patchLine(selectedLine, { dashed: !lines.find((l) => l.id === selectedLine)!.dashed })}
+          onCycleWeight={() => {
+            const w = lines.find((l) => l.id === selectedLine)!.weight ?? 2;
+            patchLine(selectedLine, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 });
+          }}
+          onDelete={() => removeLine(selectedLine)}
         />
       ) : isMulti ? (
         <CommonSubRail
@@ -1057,7 +1199,7 @@ export function Canvas({
 
       <div
         ref={viewportRef}
-        className="relative flex-1 touch-none overflow-hidden bg-slate-50"
+        className={`relative flex-1 touch-none overflow-hidden bg-slate-50 ${armLine ? "cursor-crosshair" : ""}`}
         onPointerDown={onViewportPointerDown}
         onPointerMove={onViewportPointerMove}
         onPointerUp={onViewportPointerUp}
@@ -1132,6 +1274,18 @@ export function Canvas({
                 setEditingId(null);
               }}
             />
+            <LineLayer
+              geo={lineGeo}
+              draw={lineDraw ? { a: { x: lineDraw.a.x, y: lineDraw.a.y }, b: { x: lineDraw.b.x, y: lineDraw.b.y } } : null}
+              readOnly={readOnly}
+              selectedId={selectedLine}
+              onSelect={(id) => {
+                setSelectedLine(id);
+                setSelectedIds([]);
+                setSelectedConn(null);
+                setEditingId(null);
+              }}
+            />
             {elements.map((el) => (
               <ElementCard
                 key={el.id}
@@ -1192,6 +1346,26 @@ export function Canvas({
                 setEditingConnLabel(null);
               }}
             />
+            <LineOverlay
+              geo={lineGeo}
+              zoom={view.zoom}
+              readOnly={readOnly}
+              selectedId={selectedLine}
+              editingId={editingLineLabel}
+              snapPt={snapPt}
+              onSelect={(id) => {
+                setSelectedLine(id);
+                setSelectedIds([]);
+                setSelectedConn(null);
+              }}
+              onEndpointDown={startLineEndpointDrag}
+              onBendDown={startLineBendDrag}
+              onBendReset={(id) => patchLine(id, { bend: undefined })}
+              onLabelCommit={(id, label) => {
+                setLineLabel(id, label);
+                setEditingLineLabel(null);
+              }}
+            />
             {peers.map((p) => (
               <PeerCursor key={p.clientId} peer={p} zoom={view.zoom} />
             ))}
@@ -1243,6 +1417,43 @@ function edgePoint(e: Element, tx: number, ty: number): { x: number; y: number }
   return { x: x + dx * s, y: y + dy * s };
 }
 
+// The 9 snap anchors of an element: corners, edge-midpoints, centre.
+const ANCHOR_KEYS: AnchorKey[] = ["tl", "tm", "tr", "lm", "c", "rm", "bl", "bm", "br"];
+function anchorPoint(el: Element, key: AnchorKey): { x: number; y: number } {
+  const left = key === "tl" || key === "lm" || key === "bl";
+  const right = key === "tr" || key === "rm" || key === "br";
+  const top = key === "tl" || key === "tm" || key === "tr";
+  const bottom = key === "bl" || key === "bm" || key === "br";
+  return {
+    x: left ? el.x : right ? el.x + el.w : el.x + el.w / 2,
+    y: top ? el.y : bottom ? el.y + el.h : el.y + el.h / 2,
+  };
+}
+// Nearest element anchor to a world point within threshold; null if none close.
+function nearestAnchor(p: { x: number; y: number }, els: Element[], threshold: number): { elementId: string; anchor: AnchorKey; pt: { x: number; y: number } } | null {
+  let best: { elementId: string; anchor: AnchorKey; pt: { x: number; y: number } } | null = null;
+  let bestD = threshold;
+  for (const el of els) {
+    for (const k of ANCHOR_KEYS) {
+      const a = anchorPoint(el, k);
+      const d = Math.hypot(a.x - p.x, a.y - p.y);
+      if (d < bestD) {
+        bestD = d;
+        best = { elementId: el.id, anchor: k, pt: a };
+      }
+    }
+  }
+  return best;
+}
+// Resolve a line endpoint to a world point — a pinned endpoint tracks its element's anchor.
+function resolveEnd(ep: LineEndpoint, byId: Map<string, Element>): { x: number; y: number } {
+  if (ep.elementId && ep.anchor) {
+    const el = byId.get(ep.elementId);
+    if (el) return anchorPoint(el, ep.anchor);
+  }
+  return { x: ep.x, y: ep.y };
+}
+
 type Pt = { x: number; y: number };
 export interface ConnLine {
   c: Connection;
@@ -1292,6 +1503,133 @@ function connPath(p1: Pt, p2: Pt, ctrl: Pt | null): string {
 }
 
 const CONN_DEFAULT = "#475569"; // slate-600
+
+export interface LineGeo {
+  l: LineShape;
+  a: Pt;
+  b: Pt;
+  ctrl: Pt | null;
+  handle: Pt;
+  d: string;
+}
+// Resolve standalone-line geometry (endpoints + optional bend), honouring a dragged endpoint.
+function computeLineGeo(lines: LineShape[], elements: Element[], lineDrag: { id: string; which: "a" | "b"; ep: LineEndpoint } | null): LineGeo[] {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  return lines.map((l) => {
+    const aEp = lineDrag?.id === l.id && lineDrag.which === "a" ? lineDrag.ep : l.a;
+    const bEp = lineDrag?.id === l.id && lineDrag.which === "b" ? lineDrag.ep : l.b;
+    const a = resolveEnd(aEp, byId);
+    const b = resolveEnd(bEp, byId);
+    const ctrl = l.bend ? { x: (a.x + b.x) / 2 + l.bend.x, y: (a.y + b.y) / 2 + l.bend.y } : null;
+    const handle = ctrl ? { x: 0.25 * a.x + 0.5 * ctrl.x + 0.25 * b.x, y: 0.25 * a.y + 0.5 * ctrl.y + 0.25 * b.y } : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return { l, a, b, ctrl, handle, d: connPath(a, b, ctrl) };
+  });
+}
+
+// Standalone-line paths (behind elements). `draw` is the in-progress line being drawn.
+function LineLayer({ geo, draw, readOnly, selectedId, onSelect }: { geo: LineGeo[]; draw: { a: Pt; b: Pt } | null; readOnly?: boolean; selectedId: string | null; onSelect: (id: string) => void }) {
+  return (
+    <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
+      {geo.map(({ l, d }) => {
+        const sel = l.id === selectedId;
+        return (
+          <g
+            key={l.id}
+            style={{ pointerEvents: readOnly ? "none" : "stroke", cursor: readOnly ? "default" : "pointer" }}
+            onPointerDown={readOnly ? undefined : (e) => { e.stopPropagation(); onSelect(l.id); }}
+          >
+            <path d={d} fill="none" stroke="transparent" strokeWidth={16} />
+            <path
+              d={d}
+              fill="none"
+              stroke={l.color ?? CONN_DEFAULT}
+              strokeWidth={(l.weight ?? 2) + (sel ? 1 : 0)}
+              strokeDasharray={l.dashed ? "6 5" : undefined}
+              markerStart={l.arrowStart ? "url(#conn-arrow-start)" : undefined}
+              markerEnd={l.arrowEnd ? "url(#conn-arrow)" : undefined}
+            />
+          </g>
+        );
+      })}
+      {draw && <path d={connPath(draw.a, draw.b, null)} fill="none" stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" />}
+    </svg>
+  );
+}
+
+// Interactive overlay for standalone lines: endpoint handles (drag to move/pin), bend handle, label.
+function LineOverlay({
+  geo,
+  zoom,
+  readOnly,
+  selectedId,
+  editingId,
+  snapPt,
+  onSelect,
+  onEndpointDown,
+  onBendDown,
+  onBendReset,
+  onLabelCommit,
+}: {
+  geo: LineGeo[];
+  zoom: number;
+  readOnly?: boolean;
+  selectedId: string | null;
+  editingId: string | null;
+  snapPt: Pt | null;
+  onSelect: (id: string) => void;
+  onEndpointDown: (id: string, which: "a" | "b", e: React.PointerEvent) => void;
+  onBendDown: (id: string, e: React.PointerEvent) => void;
+  onBendReset: (id: string) => void;
+  onLabelCommit: (id: string, label: string) => void;
+}) {
+  return (
+    <>
+      {snapPt && (
+        <div className="pointer-events-none absolute left-0 top-0 z-[8] h-4 w-4 rounded-full border-2 border-primary" style={{ transform: `translate(${snapPt.x}px, ${snapPt.y}px) translate(-50%, -50%) scale(${1 / zoom})` }} />
+      )}
+      {geo.map(({ l, a, b, handle }) => {
+        const sel = l.id === selectedId && !readOnly;
+        const editing = l.id === editingId && !readOnly;
+        return (
+          <div key={l.id}>
+            {sel && (
+              <>
+                <Handle pt={a} zoom={zoom} onPointerDown={(e) => onEndpointDown(l.id, "a", e)} />
+                <Handle pt={b} zoom={zoom} onPointerDown={(e) => onEndpointDown(l.id, "b", e)} />
+                {!editing && <Handle pt={handle} zoom={zoom} bend onPointerDown={(e) => onBendDown(l.id, e)} onDoubleClick={() => onBendReset(l.id)} />}
+              </>
+            )}
+            {(editing || l.label) && (
+              <div
+                className="absolute left-0 top-0 z-[6]"
+                style={{ transform: `translate(${handle.x}px, ${handle.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {editing ? (
+                  <input
+                    autoFocus
+                    defaultValue={l.label ?? ""}
+                    placeholder="Label"
+                    onBlur={(e) => onLabelCommit(l.id, e.target.value.trim())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") onLabelCommit(l.id, l.label ?? "");
+                    }}
+                    className="w-28 rounded-md border-2 border-primary bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 outline-none"
+                  />
+                ) : readOnly ? (
+                  <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{l.label}</span>
+                ) : (
+                  <button onClick={() => onSelect(l.id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{l.label}</button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 // Arrow curves — rendered behind elements so a line tucks under its originating card.
 function ConnectionLines({

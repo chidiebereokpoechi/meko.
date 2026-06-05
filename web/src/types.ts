@@ -39,6 +39,28 @@ export interface TodoItem {
   done: boolean;
 }
 
+// Standalone line. Each endpoint is a free world point, optionally pinned to an element anchor
+// (corner / edge-midpoint / centre) so it tracks the element. Snap targets are the 9 anchors.
+export type AnchorKey = "tl" | "tm" | "tr" | "lm" | "c" | "rm" | "bl" | "bm" | "br";
+export interface LineEndpoint {
+  x: number;
+  y: number;
+  elementId?: string;
+  anchor?: AnchorKey;
+}
+export interface LineShape {
+  id: string;
+  a: LineEndpoint;
+  b: LineEndpoint;
+  label?: string;
+  color?: string;
+  dashed?: boolean;
+  weight?: number;
+  bend?: { x: number; y: number };
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+}
+
 // Link between two elements. Straight by default; `bend` (control-point offset from the midpoint,
 // world coords) curves it. Arrowheads at each end are independently toggleable.
 export interface Connection {

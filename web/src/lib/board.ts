@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { API } from "./auth.ts";
 import { api } from "./api.ts";
-import type { Connection, Element } from "../types.ts";
+import type { Connection, Element, LineShape } from "../types.ts";
 
 export type ConnStatus = "connecting" | "online" | "offline";
 
@@ -23,9 +23,11 @@ export class BoardConnection {
   // Directed links between elements (arrows), keyed by id. Lives in the same doc so it syncs and
   // undoes alongside elements.
   readonly connections = this.doc.getMap<Connection>("connections");
+  // Standalone lines (not tied to two elements; endpoints may pin to element anchors).
+  readonly lines = this.doc.getMap<LineShape>("lines");
   // Undo/redo over local edits only — remote updates are applied with origin "remote", which the
   // UndoManager (default trackedOrigins = null/local) ignores, so undo never reverts peers' work.
-  readonly undoMgr = new Y.UndoManager([this.elements, this.connections]);
+  readonly undoMgr = new Y.UndoManager([this.elements, this.connections, this.lines]);
   onStatus?: (s: ConnStatus) => void;
 
   // Live peer cursors, keyed by server-assigned clientId. Ephemeral — never persisted.
