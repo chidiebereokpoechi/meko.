@@ -1867,8 +1867,10 @@ function isImageUrl(u: string): boolean {
 // Yjs). stopPropagation so editing doesn't drag the card; "Add a caption" placeholder when empty.
 // On focus it registers as the active editor + signals caption-editing so the rail shows the
 // note-style text-formatting tools.
-function CaptionField({ html, readOnly, onText, onRegister, onFocusCaption }: { html: string; readOnly?: boolean; onText: (html: string) => void; onRegister: (e: ActiveEditor) => void; onFocusCaption: () => void }) {
+function CaptionField({ html, editing, readOnly, onText, onRegister, onFocusCaption }: { html: string; editing: boolean; readOnly?: boolean; onText: (html: string) => void; onRegister: (e: ActiveEditor) => void; onFocusCaption: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Editable only on a writable board AND once the card is in edit mode (the second click).
+  const active = editing && !readOnly;
   useEffect(() => {
     if (ref.current) ref.current.innerHTML = sanitizeHtml(html);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1879,20 +1881,27 @@ function CaptionField({ html, readOnly, onText, onRegister, onFocusCaption }: { 
     const clean = sanitizeHtml(html);
     if (d.innerHTML !== clean) d.innerHTML = clean;
   });
+  // Focus the caption when the card enters edit mode (second click), mirroring a note.
+  useEffect(() => {
+    if (active && ref.current && document.activeElement !== ref.current) ref.current.focus();
+  }, [active]);
   return (
     <div
       ref={ref}
-      contentEditable={!readOnly}
+      contentEditable={active}
       suppressContentEditableWarning
       data-empty-placeholder={readOnly ? "" : "Add a caption"}
       className="note-editable border-t-2 border-slate-100 p-2 text-xs text-slate-700 outline-none"
-      onPointerDown={(e) => e.stopPropagation()}
+      // While editing keep the caret from dragging the card; otherwise let the pointer bubble so the
+      // first click selects and the second enters edit mode.
+      onPointerDown={active ? (e: React.PointerEvent) => e.stopPropagation() : undefined}
       onClick={(e) => {
-        // A click on a link inside the editable would just place the caret — open it instead.
+        // A click on a link inside the caption opens it instead of selecting/editing the card.
         const a = (e.target as HTMLElement).closest("a");
         const href = a?.getAttribute("href");
         if (href) {
           e.preventDefault();
+          e.stopPropagation();
           window.open(href, "_blank", "noopener,noreferrer");
         }
       }}
@@ -1908,9 +1917,12 @@ function CaptionField({ html, readOnly, onText, onRegister, onFocusCaption }: { 
 // Checklist body: optional title + checkable, editable items. Enter adds an item below; Backspace
 // on an empty item removes it. Every change patches the whole items array into the Yjs element.
 type Todo = Extract<Element, { type: "todo" }>;
-function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; onChange: (patch: { title?: string; items?: TodoItem[] }) => void }) {
+function TodoBody({ el, editing, readOnly, onChange }: { el: Todo; editing: boolean; readOnly?: boolean; onChange: (patch: { title?: string; items?: TodoItem[] }) => void }) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const titleRef = useRef<HTMLInputElement>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  // Interactive only on a writable board AND once the card is in edit mode (the second click).
+  const active = editing && !readOnly;
 
   useEffect(() => {
     if (focusId && inputs.current[focusId]) {
@@ -1918,6 +1930,12 @@ function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; on
       setFocusId(null);
     }
   }, [focusId, el.items]);
+
+  // Entering edit mode (the second click) focuses the title, mirroring how a note focuses on its
+  // second click. Until then the body is non-interactive so the first click only selects the card.
+  useEffect(() => {
+    if (active && document.activeElement !== titleRef.current) titleRef.current?.focus();
+  }, [active]);
 
   const setItems = (items: TodoItem[]) => onChange({ items });
   const toggle = (id: string) => setItems(el.items.map((it) => (it.id === id ? { ...it, done: !it.done } : it)));
@@ -1938,12 +1956,15 @@ function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; on
   const stop = (e: React.PointerEvent) => e.stopPropagation();
 
   return (
-    <div className="flex w-full flex-col gap-1 p-2">
+    // While not editing the body is non-interactive (pointer-events-none) so a click falls through
+    // to the card: the first click selects, the second enters edit mode (then this turns back on).
+    <div className={`flex w-full flex-col gap-1 p-2 ${active ? "" : "pointer-events-none"}`}>
       <input
+        ref={titleRef}
         value={el.title ?? ""}
         onChange={(e) => onChange({ title: e.target.value })}
         onPointerDown={stop}
-        readOnly={readOnly}
+        readOnly={!active}
         placeholder={readOnly ? "" : "To-do"}
         className="bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400"
       />
@@ -1952,8 +1973,8 @@ function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; on
           <div key={it.id} className="flex items-center gap-2">
             <button
               onPointerDown={stop}
-              onClick={() => !readOnly && toggle(it.id)}
-              disabled={readOnly}
+              onClick={() => active && toggle(it.id)}
+              disabled={!active}
               aria-label={it.done ? "Mark not done" : "Mark done"}
               className={`grid h-4 w-4 shrink-0 place-items-center rounded border-2 ${it.done ? "border-primary bg-primary text-white" : "border-slate-300"}`}
             >
@@ -1964,9 +1985,9 @@ function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; on
               value={it.text}
               onChange={(e) => setText(it.id, e.target.value)}
               onPointerDown={stop}
-              readOnly={readOnly}
+              readOnly={!active}
               onKeyDown={(e) => {
-                if (readOnly) return;
+                if (!active) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   addAfter(idx);
@@ -1981,7 +2002,7 @@ function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; on
           </div>
         ))}
       </div>
-      {!readOnly && (
+      {active && (
         <button onPointerDown={stop} onClick={() => addAfter(el.items.length - 1)} className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-primary">
           <Icon.PlusIcon className="text-xs" /> Add item
         </button>
@@ -2047,6 +2068,9 @@ function ElementCard({
   const justSelected = useRef(false);
   const dragged = useRef(false);
   const isText = el.type === "note" || el.type === "text";
+  // Element types with an inline editable text zone — these enter edit mode on the second click
+  // (first click just selects), same as a note. Images only when their caption is shown.
+  const editsText = isText || el.type === "todo" || (el.type === "image" && !!el.showCaption);
 
   // Report rendered height so connection endpoints anchor to the real card edge (auto-height cards).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -2089,7 +2113,7 @@ function ElementCard({
       onOpen();
       return;
     }
-    if (isText && !readOnly && !justSelected.current && !editing && !dragged.current)
+    if (editsText && !readOnly && !justSelected.current && !editing && !dragged.current)
       onEdit();
   };
   // Non-text elements (e.g. links) open on double-click.
@@ -2184,7 +2208,7 @@ function ElementCard({
               image…
             </div>
           )}
-          {el.showCaption && <CaptionField html={el.caption ?? ""} readOnly={readOnly} onText={(h) => onCaption?.(h)} onRegister={onRegister} onFocusCaption={() => onCaptionFocus?.()} />}
+          {el.showCaption && <CaptionField html={el.caption ?? ""} editing={editing} readOnly={readOnly} onText={(h) => onCaption?.(h)} onRegister={onRegister} onFocusCaption={() => onCaptionFocus?.()} />}
         </div>
       ) : el.type === "link" ? (
         <div
@@ -2230,7 +2254,7 @@ function ElementCard({
       ) : el.type === "todo" ? (
         <div className="flex w-full flex-col overflow-hidden">
           {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
-          <TodoBody el={el} readOnly={readOnly} onChange={(p) => onTodo?.(p)} />
+          <TodoBody el={el} editing={editing} readOnly={readOnly} onChange={(p) => onTodo?.(p)} />
         </div>
       ) : el.type === "board" ? (
         <div className="flex h-full w-full flex-col overflow-hidden">
