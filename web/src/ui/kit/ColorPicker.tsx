@@ -28,7 +28,7 @@ function isLight(hex: string): boolean {
   return (r * 0.299 + g * 0.587 + b * 0.114) / 255 > 0.82;
 }
 
-export function ColorPicker({ value, onChange }: { value?: string; onChange: (hex: string) => void }) {
+export function ColorPicker({ value, onChange, palette = PALETTE }: { value?: string; onChange: (hex: string) => void; palette?: string[] }) {
   const [custom, setCustom] = useState(false);
   return (
     <div className="flex w-full flex-col items-center gap-4">
@@ -36,7 +36,7 @@ export function ColorPicker({ value, onChange }: { value?: string; onChange: (he
         <HexColorPicker color={value ?? "#6E24FF"} onChange={(v) => onChange(v.toUpperCase())} style={{ width: "100%" }} />
       ) : (
         <div className="flex flex-wrap justify-center gap-2.5">
-          {PALETTE.map((c) => (
+          {palette.map((c) => (
             <button
               key={c}
               onClick={() => onChange(c.toUpperCase())}

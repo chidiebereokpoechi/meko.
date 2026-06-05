@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
@@ -13,6 +13,7 @@ import { ImageSubRail } from "./ImageSubRail.tsx";
 import { CommonSubRail } from "./CommonSubRail.tsx";
 import { TodoSubRail } from "./TodoSubRail.tsx";
 import { BoardSubRail } from "./BoardSubRail.tsx";
+import { ConnectionSubRail } from "./ConnectionSubRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
@@ -87,11 +88,20 @@ export function Canvas({
   const [showGrid, setShowGrid] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  // Read-only until the server's hello confirms edit access — viewers never mutate locally.
+  const [readOnly, setReadOnly] = useState(true);
+  // Measured rendered heights for auto-height cards, keyed by element id (for connection geometry).
+  const [cardHeights, setCardHeights] = useState<Record<string, number>>({});
+  const reportHeight = useCallback((id: string, h: number) => {
+    setCardHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
+  }, []);
   // In-progress arrow drag from an element's connect ball; linkEnd is the live pointer (world).
   const [linking, setLinking] = useState<{ from: string } | null>(null);
   const [linkEnd, setLinkEnd] = useState<{ x: number; y: number } | null>(null);
   const [selectedConn, setSelectedConn] = useState<string | null>(null);
-  const [renameConn, setRenameConn] = useState<string | null>(null);
+  // Inline label editing + live endpoint reassignment for the selected connection.
+  const [editingConnLabel, setEditingConnLabel] = useState<string | null>(null);
+  const [connDrag, setConnDrag] = useState<{ id: string; which: "from" | "to"; pos: { x: number; y: number } } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -102,6 +112,7 @@ export function Canvas({
       setCommentSignal((s) => s + 1);
       if (!showCommentsRef.current) setUnreadComments(true);
     };
+    c.onAccess = (canEdit) => setReadOnly(!canEdit);
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
     c.connections.observe(bump);
@@ -135,6 +146,10 @@ export function Canvas({
   const connections: Connection[] = connRef.current
     ? Array.from(connRef.current.connections.values())
     : [];
+  // Auto-height elements (todo/link/image) don't keep el.h in sync with their rendered height, so
+  // connection endpoints would miss. Use measured heights for connection geometry.
+  const sizedElements = elements.map((e) => ({ ...e, h: cardHeights[e.id] ?? e.h }));
+  const connLines = computeLines(sizedElements, connections, connDrag);
   // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
   // select many.
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
@@ -151,7 +166,7 @@ export function Canvas({
     // Avoid duplicate arrows in the same direction.
     if (Array.from(c.connections.values()).some((cn) => cn.from === from && cn.to === to)) return;
     const id = crypto.randomUUID();
-    c.connections.set(id, { id, from, to });
+    c.connections.set(id, { id, from, to, arrowEnd: true });
   };
   const removeConnection = (id: string) => {
     connRef.current?.connections.delete(id);
@@ -161,6 +176,11 @@ export function Canvas({
     const c = connRef.current;
     const cur = c?.connections.get(id);
     if (c && cur) c.connections.set(id, { ...cur, label: label || undefined });
+  };
+  const patchConnection = (id: string, p: Partial<Connection>) => {
+    const c = connRef.current;
+    const cur = c?.connections.get(id);
+    if (c && cur) c.connections.set(id, { ...cur, ...p });
   };
 
   useEffect(() => {
@@ -230,6 +250,7 @@ export function Canvas({
     setEditingId(null);
     setCaptionEditing(false);
     setSelectedConn(null);
+    setEditingConnLabel(null);
   };
 
   const overDeleteZone = (x: number, y: number) => {
@@ -250,6 +271,7 @@ export function Canvas({
   // Backspace/Delete removes the selected element — unless a text field is focused (editing).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (readOnly) return;
       if (e.key !== "Backspace" && e.key !== "Delete") return;
       if (editingId) return;
       const ae = document.activeElement as HTMLElement | null;
@@ -267,7 +289,7 @@ export function Canvas({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedIds, editingId]);
+  }, [selectedIds, editingId, readOnly]);
 
   // Undo/redo hotkeys: ⌘/Ctrl+Z, and ⌘/Ctrl+Y or ⇧⌘/Ctrl+Z. Skipped while typing so the browser
   // handles in-note text undo instead.
@@ -338,6 +360,7 @@ export function Canvas({
   // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
   // to whatever element sits under the cursor.
   const startLink = (from: string, e: React.PointerEvent) => {
+    if (readOnly) return;
     e.stopPropagation();
     setLinking({ from });
     setLinkEnd(toWorld(e.clientX, e.clientY));
@@ -347,10 +370,59 @@ export function Canvas({
       window.removeEventListener("pointerup", up);
       const w = toWorld(ev.clientX, ev.clientY);
       // Topmost element under the pointer (later in array = drawn on top).
-      const target = [...elements].reverse().find((el) => el.id !== from && w.x >= el.x && w.x <= el.x + el.w && w.y >= el.y && w.y <= el.y + el.h);
+      const target = [...sizedElements].reverse().find((el) => el.id !== from && w.x >= el.x && w.x <= el.x + el.w && w.y >= el.y && w.y <= el.y + el.h);
       if (target) addConnection(from, target.id);
       setLinking(null);
       setLinkEnd(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+
+  // Drag a selected connection's endpoint to re-anchor it: the endpoint follows the cursor, and on
+  // release it reassigns to whatever element is under the pointer (must differ from the other end).
+  const startEndpointDrag = (id: string, which: "from" | "to", e: React.PointerEvent) => {
+    if (readOnly) return;
+    e.stopPropagation();
+    setConnDrag({ id, which, pos: toWorld(e.clientX, e.clientY) });
+    const move = (ev: PointerEvent) => setConnDrag({ id, which, pos: toWorld(ev.clientX, ev.clientY) });
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const w = toWorld(ev.clientX, ev.clientY);
+      const cn = connRef.current?.connections.get(id);
+      const target = [...sizedElements].reverse().find((el) => w.x >= el.x && w.x <= el.x + el.w && w.y >= el.y && w.y <= el.y + el.h);
+      if (cn && target) {
+        const other = which === "from" ? cn.to : cn.from;
+        if (target.id !== other) patchConnection(id, { [which]: target.id });
+      }
+      setConnDrag(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // Drag the midpoint handle to curve the line; releasing near the straight midpoint snaps it back.
+  const startBendDrag = (id: string, e: React.PointerEvent) => {
+    if (readOnly) return;
+    e.stopPropagation();
+    const apply = (clientX: number, clientY: number) => {
+      const c = connRef.current;
+      const cn = c?.connections.get(id);
+      const from = elements.find((el) => el.id === cn?.from);
+      const to = elements.find((el) => el.id === cn?.to);
+      if (!cn || !from || !to) return;
+      const mid = { x: (from.x + from.w / 2 + to.x + to.w / 2) / 2, y: (from.y + from.h / 2 + to.y + to.h / 2) / 2 };
+      const w = toWorld(clientX, clientY);
+      // ctrl ≈ 2*(handle - mid) so the curve's midpoint tracks the cursor.
+      const bend = { x: 2 * (w.x - mid.x), y: 2 * (w.y - mid.y) };
+      patchConnection(id, { bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend });
+    };
+    const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -680,6 +752,7 @@ export function Canvas({
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (readOnly) return;
     const { x, y } = toWorld(e.clientX, e.clientY);
 
     const tool = e.dataTransfer.getData("application/x-meko-tool");
@@ -716,6 +789,7 @@ export function Canvas({
   // normal text paste works.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (readOnly) return;
       const ae = document.activeElement as HTMLElement | null;
       if (
         editingId ||
@@ -745,7 +819,7 @@ export function Canvas({
     };
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
-  }, [editingId]);
+  }, [editingId, readOnly]);
 
   const createTools: Tool[] = [
     {
@@ -842,7 +916,27 @@ export function Canvas({
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      {isMulti ? (
+      {readOnly ? (
+        <nav className="flex w-20 shrink-0 flex-col items-center gap-2 border-r-2 border-slate-100 bg-white py-3 text-center">
+          <Icon.EyeIcon className="text-xl text-slate-400" />
+          <span className="px-1 text-[10px] font-bold leading-tight text-slate-400">View only</span>
+        </nav>
+      ) : selectedConn && connections.find((c) => c.id === selectedConn) ? (
+        <ConnectionSubRail
+          conn={connections.find((c) => c.id === selectedConn)!}
+          onDone={() => setSelectedConn(null)}
+          onColor={(hex: string) => patchConnection(selectedConn, { color: hex })}
+          onToggleStart={() => patchConnection(selectedConn, { arrowStart: !(connections.find((c) => c.id === selectedConn)!.arrowStart ?? false) })}
+          onToggleEnd={() => patchConnection(selectedConn, { arrowEnd: !(connections.find((c) => c.id === selectedConn)!.arrowEnd ?? true) })}
+          onLabel={() => setEditingConnLabel(selectedConn)}
+          onToggleDashed={() => patchConnection(selectedConn, { dashed: !connections.find((c) => c.id === selectedConn)!.dashed })}
+          onCycleWeight={() => {
+            const w = connections.find((c) => c.id === selectedConn)!.weight ?? 2;
+            patchConnection(selectedConn, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 });
+          }}
+          onDelete={() => removeConnection(selectedConn)}
+        />
+      ) : isMulti ? (
         <CommonSubRail
           els={selectedEls}
           deleteRef={deleteRef}
@@ -958,17 +1052,6 @@ export function Canvas({
         onSubmit={createBoardElement}
       />
 
-      <NameModal
-        open={!!renameConn}
-        title="Label connection"
-        label="Label"
-        submitLabel="Save"
-        initial={renameConn ? connections.find((c) => c.id === renameConn)?.label ?? "" : ""}
-        onClose={() => setRenameConn(null)}
-        onSubmit={(label) => {
-          if (renameConn) setConnectionLabel(renameConn, label);
-        }}
-      />
 
       {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
 
@@ -1037,18 +1120,17 @@ export function Canvas({
             className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)]" : ""}`}
             style={{ width: WORLD_W, height: WORLD_H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
           >
-            <ConnectionsLayer
-              elements={elements}
-              connections={connections}
+            {/* Lines render behind elements; handles + labels render above (after the cards). */}
+            <ConnectionLines
+              lines={connLines}
               temp={linking && linkEnd ? { from: elements.find((e) => e.id === linking.from) ?? null, end: linkEnd } : null}
-              zoom={view.zoom}
+              readOnly={readOnly}
               selectedId={selectedConn}
               onSelect={(id) => {
                 setSelectedConn(id);
                 setSelectedIds([]);
+                setEditingId(null);
               }}
-              onRename={(id) => setRenameConn(id)}
-              onDelete={removeConnection}
             />
             {elements.map((el) => (
               <ElementCard
@@ -1077,6 +1159,8 @@ export function Canvas({
                 onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
                 onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
                 onStartLink={(e) => startLink(el.id, e)}
+                onSize={reportHeight}
+                readOnly={readOnly}
                 onCaptionFocus={() => {
                   selectId(el.id);
                   setCaptionEditing(true);
@@ -1089,6 +1173,25 @@ export function Canvas({
                 onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
               />
             ))}
+            <ConnectionOverlay
+              lines={connLines}
+              zoom={view.zoom}
+              readOnly={readOnly}
+              selectedId={selectedConn}
+              editingId={editingConnLabel}
+              onSelect={(id) => {
+                setSelectedConn(id);
+                setSelectedIds([]);
+                setEditingId(null);
+              }}
+              onEndpointDown={startEndpointDrag}
+              onBendDown={startBendDrag}
+              onBendReset={(id) => patchConnection(id, { bend: undefined })}
+              onLabelCommit={(id, label) => {
+                setConnectionLabel(id, label);
+                setEditingConnLabel(null);
+              }}
+            />
             {peers.map((p) => (
               <PeerCursor key={p.clientId} peer={p} zoom={view.zoom} />
             ))}
@@ -1140,86 +1243,187 @@ function edgePoint(e: Element, tx: number, ty: number): { x: number; y: number }
   return { x: x + dx * s, y: y + dy * s };
 }
 
-// SVG arrows for connections, plus labels and the per-arrow rename/delete toolbar. Lives inside the
-// transformed world layer so arrows pan/zoom with the board; labels counter-scale to stay legible.
-function ConnectionsLayer({
-  elements,
-  connections,
+type Pt = { x: number; y: number };
+export interface ConnLine {
+  c: Connection;
+  p1: Pt; // visible edge endpoints (for handles + label midpoint)
+  p2: Pt;
+  ctrl: Pt | null; // quadratic control point when bent, else null (straight)
+  handle: Pt; // midpoint bend handle (sits on the line)
+  d: string; // SVG path — drawn from element CENTRES (behind the card) for ends without an arrow,
+}
+
+// Resolve each connection's geometry. The path is drawn from a card's CENTRE when that end has no
+// arrowhead, so the line tucks behind the card and emerges cleanly at its edge regardless of the
+// card's exact size; the arrowhead end anchors on the border so the head sits at the edge. Handles
+// and the label use the visible edge points. A dragged endpoint follows the cursor.
+function computeLines(elements: Element[], connections: Connection[], connDrag: { id: string; which: "from" | "to"; pos: Pt } | null): ConnLine[] {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const out: ConnLine[] = [];
+  for (const c of connections) {
+    const from = byId.get(c.from);
+    const to = byId.get(c.to);
+    if (!from || !to) continue;
+    const fromC = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
+    const toC = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
+    const ctrl = c.bend ? { x: (fromC.x + toC.x) / 2 + c.bend.x, y: (fromC.y + toC.y) / 2 + c.bend.y } : null;
+    const dragFrom = connDrag?.id === c.id && connDrag.which === "from";
+    const dragTo = connDrag?.id === c.id && connDrag.which === "to";
+    const fromAim = ctrl ?? (dragTo ? connDrag!.pos : toC);
+    const toAim = ctrl ?? (dragFrom ? connDrag!.pos : fromC);
+    const edge1 = dragFrom ? connDrag!.pos : edgePoint(from, fromAim.x, fromAim.y);
+    const edge2 = dragTo ? connDrag!.pos : edgePoint(to, toAim.x, toAim.y);
+    const startArrow = c.arrowStart ?? false;
+    const endArrow = c.arrowEnd ?? true;
+    // Draw from centre (behind card) on ends without an arrowhead; from edge when arrowed.
+    const draw1 = dragFrom ? connDrag!.pos : startArrow ? edge1 : fromC;
+    const draw2 = dragTo ? connDrag!.pos : endArrow ? edge2 : toC;
+    const handle = ctrl
+      ? { x: 0.25 * edge1.x + 0.5 * ctrl.x + 0.25 * edge2.x, y: 0.25 * edge1.y + 0.5 * ctrl.y + 0.25 * edge2.y }
+      : { x: (edge1.x + edge2.x) / 2, y: (edge1.y + edge2.y) / 2 };
+    out.push({ c, p1: edge1, p2: edge2, ctrl, handle, d: connPath(draw1, draw2, ctrl) });
+  }
+  return out;
+}
+
+// Straight by default; a quadratic through the control point when bent.
+function connPath(p1: Pt, p2: Pt, ctrl: Pt | null): string {
+  return ctrl ? `M${p1.x},${p1.y} Q${ctrl.x},${ctrl.y} ${p2.x},${p2.y}` : `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+}
+
+const CONN_DEFAULT = "#475569"; // slate-600
+
+// Arrow curves — rendered behind elements so a line tucks under its originating card.
+function ConnectionLines({
+  lines,
   temp,
-  zoom,
+  readOnly,
   selectedId,
   onSelect,
-  onRename,
-  onDelete,
 }: {
-  elements: Element[];
-  connections: Connection[];
-  temp: { from: Element | null; end: { x: number; y: number } } | null;
-  zoom: number;
+  lines: ConnLine[];
+  temp: { from: Element | null; end: Pt } | null;
+  readOnly?: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onRename: (id: string) => void;
-  onDelete: (id: string) => void;
 }) {
-  const byId = new Map(elements.map((e) => [e.id, e]));
-  const lines = connections
-    .map((c) => {
-      const from = byId.get(c.from);
-      const to = byId.get(c.to);
-      if (!from || !to) return null;
-      const p1 = edgePoint(from, to.x + to.w / 2, to.y + to.h / 2);
-      const p2 = edgePoint(to, from.x + from.w / 2, from.y + from.h / 2);
-      return { c, p1, p2, mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 } };
-    })
-    .filter(Boolean) as { c: Connection; p1: { x: number; y: number }; p2: { x: number; y: number }; mid: { x: number; y: number } }[];
-
   const tempP1 = temp?.from ? edgePoint(temp.from, temp.end.x, temp.end.y) : null;
+  return (
+    <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
+      <defs>
+        {/* context-stroke makes each arrowhead match its line colour; start head reverses. */}
+        <marker id="conn-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="context-stroke" /></marker>
+        <marker id="conn-arrow-start" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto-start-reverse"><path d="M0,0 L6,3 L0,6 Z" fill="context-stroke" /></marker>
+      </defs>
+      {lines.map(({ c, d }) => {
+        const sel = c.id === selectedId;
+        const color = c.color ?? CONN_DEFAULT;
+        const arrowEnd = c.arrowEnd ?? true;
+        return (
+          <g
+            key={c.id}
+            style={{ pointerEvents: readOnly ? "none" : "stroke", cursor: readOnly ? "default" : "pointer" }}
+            onPointerDown={readOnly ? undefined : (e) => { e.stopPropagation(); onSelect(c.id); }}
+          >
+            <path d={d} fill="none" stroke="transparent" strokeWidth={16} />
+            <path
+              d={d}
+              fill="none"
+              stroke={color}
+              strokeWidth={(c.weight ?? 2) + (sel ? 1 : 0)}
+              strokeDasharray={c.dashed ? "6 5" : undefined}
+              markerStart={c.arrowStart ? "url(#conn-arrow-start)" : undefined}
+              markerEnd={arrowEnd ? "url(#conn-arrow)" : undefined}
+            />
+          </g>
+        );
+      })}
+      {tempP1 && temp && (
+        <path d={connPath(tempP1, temp.end, null)} fill="none" stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#conn-arrow)" />
+      )}
+    </svg>
+  );
+}
 
+// Interactive overlay (above elements): endpoint handles for reassigning, and the in-place label.
+function ConnectionOverlay({
+  lines,
+  zoom,
+  readOnly,
+  selectedId,
+  editingId,
+  onSelect,
+  onEndpointDown,
+  onBendDown,
+  onBendReset,
+  onLabelCommit,
+}: {
+  lines: ConnLine[];
+  zoom: number;
+  readOnly?: boolean;
+  selectedId: string | null;
+  editingId: string | null;
+  onSelect: (id: string) => void;
+  onEndpointDown: (id: string, which: "from" | "to", e: React.PointerEvent) => void;
+  onBendDown: (id: string, e: React.PointerEvent) => void;
+  onBendReset: (id: string) => void;
+  onLabelCommit: (id: string, label: string) => void;
+}) {
   return (
     <>
-      <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
-        <defs>
-          <marker id="arrow-slate" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8" /></marker>
-          <marker id="arrow-primary" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6e24ff" /></marker>
-        </defs>
-        {lines.map(({ c, p1, p2 }) => {
-          const sel = c.id === selectedId;
-          return (
-            <g key={c.id} style={{ pointerEvents: "stroke", cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); onSelect(c.id); }}>
-              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="transparent" strokeWidth={16} />
-              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={sel ? "#6e24ff" : "#94a3b8"} strokeWidth={sel ? 3 : 2} markerEnd={`url(#${sel ? "arrow-primary" : "arrow-slate"})`} />
-            </g>
-          );
-        })}
-        {tempP1 && temp && (
-          <line x1={tempP1.x} y1={tempP1.y} x2={temp.end.x} y2={temp.end.y} stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#arrow-primary)" />
-        )}
-      </svg>
-
-      {lines.map(({ c, mid }) => {
-        const sel = c.id === selectedId;
-        if (!sel && !c.label) return null;
+      {lines.map(({ c, p1, p2, handle }) => {
+        const sel = c.id === selectedId && !readOnly;
+        const editing = c.id === editingId && !readOnly;
         return (
-          <div
-            key={c.id}
-            className="absolute left-0 top-0 z-[5]"
-            style={{ transform: `translate(${mid.x}px, ${mid.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            {sel ? (
-              <div className="flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-white px-1 py-0.5 shadow">
-                <button onClick={() => onRename(c.id)} className="rounded px-2 py-0.5 text-xs font-bold text-slate-600 hover:bg-slate-100">{c.label ? "Rename" : "Name"}</button>
-                <button onClick={() => onDelete(c.id)} className="rounded px-2 py-0.5 text-xs font-bold text-red-500 hover:bg-red-50">Delete</button>
+          <div key={c.id}>
+            {sel && (
+              <>
+                <Handle pt={p1} zoom={zoom} onPointerDown={(e) => onEndpointDown(c.id, "from", e)} />
+                <Handle pt={p2} zoom={zoom} onPointerDown={(e) => onEndpointDown(c.id, "to", e)} />
+                {/* Bend handle — drag to curve, double-click to reset straight. */}
+                {!editing && <Handle pt={handle} zoom={zoom} bend onPointerDown={(e) => onBendDown(c.id, e)} onDoubleClick={() => onBendReset(c.id)} />}
+              </>
+            )}
+            {(editing || c.label) && (
+              <div
+                className="absolute left-0 top-0 z-[6]"
+                style={{ transform: `translate(${handle.x}px, ${handle.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {editing ? (
+                  <input
+                    autoFocus
+                    defaultValue={c.label ?? ""}
+                    placeholder="Label"
+                    onBlur={(e) => onLabelCommit(c.id, e.target.value.trim())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") onLabelCommit(c.id, c.label ?? "");
+                    }}
+                    className="w-28 rounded-md border-2 border-primary bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 outline-none"
+                  />
+                ) : readOnly ? (
+                  <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{c.label}</span>
+                ) : (
+                  <button onClick={() => onSelect(c.id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{c.label}</button>
+                )}
               </div>
-            ) : (
-              <button onClick={() => onSelect(c.id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
-                {c.label}
-              </button>
             )}
           </div>
         );
       })}
     </>
+  );
+}
+
+function Handle({ pt, zoom, bend, onPointerDown, onDoubleClick }: { pt: Pt; zoom: number; bend?: boolean; onPointerDown: (e: React.PointerEvent) => void; onDoubleClick?: () => void }) {
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
+      className={`absolute left-0 top-0 z-[7] cursor-grab rounded-full border-2 shadow active:cursor-grabbing ${bend ? "h-3 w-3 border-primary bg-primary/30" : "h-3.5 w-3.5 border-primary bg-white"}`}
+      style={{ transform: `translate(${pt.x}px, ${pt.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+    />
   );
 }
 
@@ -1300,7 +1504,7 @@ function isImageUrl(u: string): boolean {
 // Yjs). stopPropagation so editing doesn't drag the card; "Add a caption" placeholder when empty.
 // On focus it registers as the active editor + signals caption-editing so the rail shows the
 // note-style text-formatting tools.
-function CaptionField({ html, onText, onRegister, onFocusCaption }: { html: string; onText: (html: string) => void; onRegister: (e: ActiveEditor) => void; onFocusCaption: () => void }) {
+function CaptionField({ html, readOnly, onText, onRegister, onFocusCaption }: { html: string; readOnly?: boolean; onText: (html: string) => void; onRegister: (e: ActiveEditor) => void; onFocusCaption: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.innerHTML = sanitizeHtml(html);
@@ -1315,9 +1519,9 @@ function CaptionField({ html, onText, onRegister, onFocusCaption }: { html: stri
   return (
     <div
       ref={ref}
-      contentEditable
+      contentEditable={!readOnly}
       suppressContentEditableWarning
-      data-empty-placeholder="Add a caption"
+      data-empty-placeholder={readOnly ? "" : "Add a caption"}
       className="note-editable border-t-2 border-slate-100 p-2 text-xs text-slate-700 outline-none"
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
@@ -1341,7 +1545,7 @@ function CaptionField({ html, onText, onRegister, onFocusCaption }: { html: stri
 // Checklist body: optional title + checkable, editable items. Enter adds an item below; Backspace
 // on an empty item removes it. Every change patches the whole items array into the Yjs element.
 type Todo = Extract<Element, { type: "todo" }>;
-function TodoBody({ el, onChange }: { el: Todo; onChange: (patch: { title?: string; items?: TodoItem[] }) => void }) {
+function TodoBody({ el, readOnly, onChange }: { el: Todo; readOnly?: boolean; onChange: (patch: { title?: string; items?: TodoItem[] }) => void }) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [focusId, setFocusId] = useState<string | null>(null);
 
@@ -1376,7 +1580,8 @@ function TodoBody({ el, onChange }: { el: Todo; onChange: (patch: { title?: stri
         value={el.title ?? ""}
         onChange={(e) => onChange({ title: e.target.value })}
         onPointerDown={stop}
-        placeholder="To-do"
+        readOnly={readOnly}
+        placeholder={readOnly ? "" : "To-do"}
         className="bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400"
       />
       <div className="grid gap-0.5">
@@ -1384,7 +1589,8 @@ function TodoBody({ el, onChange }: { el: Todo; onChange: (patch: { title?: stri
           <div key={it.id} className="flex items-center gap-2">
             <button
               onPointerDown={stop}
-              onClick={() => toggle(it.id)}
+              onClick={() => !readOnly && toggle(it.id)}
+              disabled={readOnly}
               aria-label={it.done ? "Mark not done" : "Mark done"}
               className={`grid h-4 w-4 shrink-0 place-items-center rounded border-2 ${it.done ? "border-primary bg-primary text-white" : "border-slate-300"}`}
             >
@@ -1395,7 +1601,9 @@ function TodoBody({ el, onChange }: { el: Todo; onChange: (patch: { title?: stri
               value={it.text}
               onChange={(e) => setText(it.id, e.target.value)}
               onPointerDown={stop}
+              readOnly={readOnly}
               onKeyDown={(e) => {
+                if (readOnly) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   addAfter(idx);
@@ -1404,15 +1612,17 @@ function TodoBody({ el, onChange }: { el: Todo; onChange: (patch: { title?: stri
                   removeAt(idx);
                 }
               }}
-              placeholder="Item"
+              placeholder={readOnly ? "" : "Item"}
               className={`flex-1 bg-transparent text-xs outline-none placeholder:text-slate-300 ${it.done ? "text-slate-400 line-through" : "text-slate-700"}`}
             />
           </div>
         ))}
       </div>
-      <button onPointerDown={stop} onClick={() => addAfter(el.items.length - 1)} className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-primary">
-        <Icon.PlusIcon className="text-xs" /> Add item
-      </button>
+      {!readOnly && (
+        <button onPointerDown={stop} onClick={() => addAfter(el.items.length - 1)} className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-primary">
+          <Icon.PlusIcon className="text-xs" /> Add item
+        </button>
+      )}
     </div>
   );
 }
@@ -1433,6 +1643,8 @@ function ElementCard({
   onCaptionFocus,
   onTodo,
   onStartLink,
+  onSize,
+  readOnly,
   shrink,
   dragging,
   zoom,
@@ -1455,6 +1667,8 @@ function ElementCard({
   onCaptionFocus?: () => void;
   onTodo?: (patch: { title?: string; items?: TodoItem[] }) => void;
   onStartLink?: (e: React.PointerEvent) => void;
+  onSize?: (id: string, h: number) => void;
+  readOnly?: boolean;
   shrink: boolean;
   dragging: boolean;
   zoom: number;
@@ -1471,12 +1685,24 @@ function ElementCard({
   const dragged = useRef(false);
   const isText = el.type === "note" || el.type === "text";
 
+  // Report rendered height so connection endpoints anchor to the real card edge (auto-height cards).
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node || !onSize) return;
+    const report = () => onSize(el.id, node.offsetHeight);
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [el.id, onSize]);
+
   const onPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation(); // don't let the canvas deselect / pan
     justSelected.current = !selected;
     dragged.current = false;
     if (!selected) onSelect();
-    if (!editing) {
+    if (!editing && !readOnly) {
       const w = toWorld(e.clientX, e.clientY);
       grab.current = { x: w.x - el.x, y: w.y - el.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1500,7 +1726,7 @@ function ElementCard({
       onOpen();
       return;
     }
-    if (isText && !justSelected.current && !editing && !dragged.current)
+    if (isText && !readOnly && !justSelected.current && !editing && !dragged.current)
       onEdit();
   };
   // Non-text elements (e.g. links) open on double-click.
@@ -1509,6 +1735,7 @@ function ElementCard({
   };
 
   const startResize = (e: React.PointerEvent) => {
+    if (readOnly) return;
     e.stopPropagation();
     dragged.current = true;
     size.current = { x: e.clientX, y: e.clientY, w: el.w, h: el.h };
@@ -1543,6 +1770,7 @@ function ElementCard({
 
   return (
     <div
+      ref={rootRef}
       data-selected-element={selected ? "true" : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -1593,7 +1821,7 @@ function ElementCard({
               image…
             </div>
           )}
-          {el.showCaption && <CaptionField html={el.caption ?? ""} onText={(h) => onCaption?.(h)} onRegister={onRegister} onFocusCaption={() => onCaptionFocus?.()} />}
+          {el.showCaption && <CaptionField html={el.caption ?? ""} readOnly={readOnly} onText={(h) => onCaption?.(h)} onRegister={onRegister} onFocusCaption={() => onCaptionFocus?.()} />}
         </div>
       ) : el.type === "link" ? (
         <div
@@ -1639,7 +1867,7 @@ function ElementCard({
       ) : el.type === "todo" ? (
         <div className="flex w-full flex-col overflow-hidden">
           {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
-          <TodoBody el={el} onChange={(p) => onTodo?.(p)} />
+          <TodoBody el={el} readOnly={readOnly} onChange={(p) => onTodo?.(p)} />
         </div>
       ) : el.type === "board" ? (
         <div className="flex h-full w-full flex-col overflow-hidden">
@@ -1656,7 +1884,7 @@ function ElementCard({
         </div>
       )}
 
-      {selected && onStartLink && (
+      {selected && onStartLink && !readOnly && (
         // Connect ball: drag onto another element to wire an arrow between them.
         <button
           onPointerDown={onStartLink}
@@ -1666,6 +1894,7 @@ function ElementCard({
         />
       )}
 
+      {!readOnly && (
       <div
         onPointerDown={startResize}
         onPointerMove={onResizeMove}
@@ -1675,6 +1904,7 @@ function ElementCard({
           background: `linear-gradient(135deg, transparent 50%, ${selected ? "#6e24ff" : "#cbd5e1"} 50%)`,
         }}
       />
+      )}
     </div>
   );
 }

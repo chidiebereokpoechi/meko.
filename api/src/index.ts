@@ -161,8 +161,9 @@ const app = new Elysia()
           state.authTimer = null;
           const client = makeClient(ws, state);
           await roomManager.join(state.boardId, client);
-          // Tell the client its own identity so it can exclude itself (and its other tabs) from presence.
-          client.sendText(JSON.stringify({ type: "hello", userId }));
+          // Tell the client its own identity (to exclude itself from presence) and whether it may
+          // edit — the client enforces read-only locally; the server already rejects viewer updates.
+          client.sendText(JSON.stringify({ type: "hello", userId, canEdit: state.canEdit }));
           return;
         }
         if (msg?.type === "presence") {

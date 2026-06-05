@@ -33,6 +33,8 @@ export class BoardConnection {
   onPresence?: (peers: Peer[]) => void;
   // Fired when a peer posts a comment (server pushes a signal; the panel refetches the thread).
   onComment?: () => void;
+  // Fired with the authoritative edit permission once the server's hello arrives (viewers: false).
+  onAccess?: (canEdit: boolean) => void;
   private lastCursorSent = 0;
   private selfUserId: string | null = null;
 
@@ -46,6 +48,7 @@ export class BoardConnection {
   private ws: WebSocket | null = null;
   private closed = false;
   private synced = false;
+  private canEdit = false;
 
   constructor(private boardId: string) {
     this.doc.on("update", this.onLocalUpdate);
@@ -53,6 +56,7 @@ export class BoardConnection {
 
   private onLocalUpdate = (update: Uint8Array, origin: unknown) => {
     if (origin === "remote") return;
+    if (!this.canEdit) return; // viewers never push; the server rejects them anyway
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(update);
   };
 
@@ -76,8 +80,8 @@ export class BoardConnection {
         if (!this.synced) {
           this.synced = true;
           this.onStatus?.("online");
-          // Push any edits made while offline so the server (and peers) catch up.
-          ws.send(Y.encodeStateAsUpdate(this.doc));
+          // Push any edits made while offline so the server (and peers) catch up (editors only).
+          if (this.canEdit) ws.send(Y.encodeStateAsUpdate(this.doc));
         }
       };
       ws.onerror = () => ws.close();
@@ -105,6 +109,8 @@ export class BoardConnection {
     }
     if (m.type === "hello") {
       this.selfUserId = m.userId ?? null;
+      this.canEdit = (m as { canEdit?: boolean }).canEdit ?? false;
+      this.onAccess?.(this.canEdit);
       return;
     }
     if (m.type === "comment") {

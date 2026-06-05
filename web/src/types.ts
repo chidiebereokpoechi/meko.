@@ -39,12 +39,19 @@ export interface TodoItem {
   done: boolean;
 }
 
-// Directed link between two elements, drawn as an arrow. Optional label shown at its midpoint.
+// Link between two elements. Straight by default; `bend` (control-point offset from the midpoint,
+// world coords) curves it. Arrowheads at each end are independently toggleable.
 export interface Connection {
   id: string;
   from: string;
   to: string;
   label?: string;
+  color?: string; // line colour (hex); default slate
+  dashed?: boolean;
+  weight?: number; // stroke width in px
+  bend?: { x: number; y: number };
+  arrowStart?: boolean; // default false
+  arrowEnd?: boolean; // default true
 }
 
 export interface Board {
