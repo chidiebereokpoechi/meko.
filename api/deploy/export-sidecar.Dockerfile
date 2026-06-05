@@ -1,6 +1,6 @@
 # Export sidecar (§8b): runs Chromium to rasterise board exports. Non-root; on an isolated network
 # that can reach only the API. Chromium is further locked to the API host via --host-rules.
-FROM oven/bun:1.1-alpine
+FROM oven/bun:1.3-alpine
 
 # System Chromium (not Puppeteer's bundled download — puppeteer-core uses CHROMIUM_PATH).
 RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont \

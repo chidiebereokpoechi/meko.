@@ -147,13 +147,15 @@ services:
     image: postgres:16-alpine
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-    entrypoint: >
-      sh -c "while true; do
-        pg_dump -h db -U meko meko
-          | gzip > /backups/meko_$$(date +%Y%m%d_%H%M%S).sql.gz
+    entrypoint:
+      - sh
+      - -c
+      - >
+        while true; do
+        pg_dump -h db -U meko meko | gzip > /backups/meko_$$(date +%Y%m%d_%H%M%S).sql.gz
         && find /backups -name '*.sql.gz' -mtime +${BACKUP_RETENTION_DAYS:-7} -delete;
         sleep 86400;
-      done"
+        done
     volumes:
       - ./backups:/backups
     networks: [backend]
