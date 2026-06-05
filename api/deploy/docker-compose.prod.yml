@@ -1,0 +1,170 @@
+# meko. production topology for a home server fronted by Nginx Proxy Manager on a VPS.
+#
+# TLS is terminated by NPM on the VPS — there is NO nginx/cert sidecar here. NPM proxies both
+# HTTPS and the WebSocket upgrade to this host's published app port (default 3000). Object storage
+# (RustFS) is external, so no storage service runs here — only its credentials are passed through.
+#
+# Topology: app + worker reach Postgres through PgBouncer (DATABASE_URL); the migrator and any
+# session-level lock use POSTGRES_DIRECT_URL → db:5432, bypassing PgBouncer (§3d). Redis carries
+# the multi-node Yjs bus + presence + WS tickets + rate-limit store (§3e). The export sidecar runs
+# Chromium on an isolated network that reaches ONLY the app — never db/redis (§8b). pg-backup runs
+# a daily pg_dump (§11c).
+#
+# Usage:
+#   cp deploy/.env.prod.example deploy/.env      # then fill in secrets
+#   docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml up -d --build
+#
+# In NPM: create a Proxy Host → Forward to http://<home-server-ip>:${APP_PORT} (default 3000),
+# scheme http, and enable "Websockets Support". TLS + HSTS live on the NPM side.
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://meko:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@pgbouncer:6432/meko
+  POSTGRES_DIRECT_URL: postgres://meko:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/meko
+  REDIS_URL: redis://redis:6379
+  MEKO_BASE_URL: ${MEKO_BASE_URL:?set MEKO_BASE_URL}
+  MEKO_ALLOWED_ORIGINS: ${MEKO_ALLOWED_ORIGINS:?set MEKO_ALLOWED_ORIGINS}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>=32 bytes)}
+  MEKO_INTERNAL_TOKEN: ${MEKO_INTERNAL_TOKEN:?set MEKO_INTERNAL_TOKEN}
+  # External RustFS — INTERNAL is what the app/worker dial, PUBLIC is what presigned URLs are
+  # signed for (the host the browser fetches from). Both default to S3_ENDPOINT when blank.
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_ENDPOINT_INTERNAL: ${S3_ENDPOINT_INTERNAL:-}
+  S3_ENDPOINT_PUBLIC: ${S3_ENDPOINT_PUBLIC:-}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_BUCKET: ${S3_BUCKET:-meko}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: meko
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: meko
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meko"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: db
+      DB_USER: meko
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      DB_NAME: meko
+      LISTEN_PORT: 6432 # app dials pgbouncer:6432; db stays on 5432
+      POOL_MODE: transaction # session-level advisory locks must NOT run here (§3d)
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "25"
+      AUTH_TYPE: scram-sha-256 # match postgres 16 default
+    networks: [backend]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    # Pub/sub + ephemeral WS tickets + rate-limit counters — persistence unnecessary (§16).
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [backend]
+    restart: unless-stopped
+
+  migrate:
+    build: { context: .., dockerfile: Dockerfile }
+    command: ["bun", "run", "src/db/migrate.ts"]
+    environment: *app-env
+    networks: [backend]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: { context: .., dockerfile: Dockerfile }
+    environment:
+      <<: *app-env
+      NODE_ID: app-1
+    # Published for NPM on the VPS to proxy (HTTP + WS upgrade). Bind to all interfaces so the VPS
+    # can reach it over your tunnel/LAN; tighten APP_BIND to a tunnel IP (e.g. Tailscale) if desired.
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
+    # backend for db/redis; export-internal so the sidecar can reach it.
+    networks: [backend, export-internal]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  worker:
+    build: { context: .., dockerfile: Dockerfile }
+    command: ["bun", "run", "src/worker/index.ts"]
+    environment:
+      <<: *app-env
+      NODE_ID: worker-1
+    networks: [backend]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  # Chromium export renderer (§8b). Isolated: only on export-internal, so it can reach the app but
+  # NOT db or redis. Runs as non-root (see Dockerfile); Chromium is host-locked via --host-rules.
+  export-sidecar:
+    build: { context: .., dockerfile: deploy/export-sidecar.Dockerfile }
+    environment:
+      <<: *app-env
+      NODE_ID: export-1
+      MEKO_API_INTERNAL_URL: http://app:3000
+      EXPORT_ALLOWED_HOST: app
+      CHROMIUM_PATH: /usr/bin/chromium-browser
+    networks: [export-internal]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+
+  pg-backup:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    entrypoint: >
+      sh -c "while true; do
+        pg_dump -h db -U meko meko
+          | gzip > /backups/meko_$$(date +%Y%m%d_%H%M%S).sql.gz
+        && find /backups -name '*.sql.gz' -mtime +${BACKUP_RETENTION_DAYS:-7} -delete;
+        sleep 86400;
+      done"
+    volumes:
+      - ./backups:/backups
+    networks: [backend]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+networks:
+  backend:
+  export-internal:
+
+volumes:
+  pgdata:
