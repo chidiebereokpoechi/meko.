@@ -69,6 +69,11 @@ export const FileElement = z
   .strict();
 export const EmbedElement = z.object({ ...Base, type: z.literal("embed"), src: SafeUrl }).strict();
 
+const TodoItem = z.object({ id: z.string().min(1), text: z.string().max(1_000), done: z.boolean() }).strict();
+export const TodoElement = z
+  .object({ ...Base, type: z.literal("todo"), title: z.string().max(500).optional(), items: z.array(TodoItem).max(500) })
+  .strict();
+
 export const Element = z.discriminatedUnion("type", [
   NoteElement,
   TextElement,
@@ -76,6 +81,7 @@ export const Element = z.discriminatedUnion("type", [
   LinkElement,
   FileElement,
   EmbedElement,
+  TodoElement,
 ]);
 
 export type Element = z.infer<typeof Element>;

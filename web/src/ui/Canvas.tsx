@@ -3,13 +3,14 @@ import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
-import type { Element } from "../types.ts";
+import type { Element, TodoItem } from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
 import { LinkSubRail } from "./LinkSubRail.tsx";
 import { ImageSubRail } from "./ImageSubRail.tsx";
 import { CommonSubRail } from "./CommonSubRail.tsx";
+import { TodoSubRail } from "./TodoSubRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
@@ -396,6 +397,24 @@ export function Canvas({
     setEditingId(null);
   };
 
+  const createTodo = (x: number, y: number) => {
+    const c = connRef.current;
+    if (!c) return;
+    const id = crypto.randomUUID();
+    c.elements.set(id, {
+      id,
+      type: "todo",
+      x,
+      y,
+      w: 240,
+      h: 140,
+      title: "",
+      items: [{ id: crypto.randomUUID(), text: "", done: false }],
+      style: { fill: "#ffffff" },
+    });
+    selectId(id);
+  };
+
   const pickImageAt = (x: number, y: number) => {
     dropCoords.current = { x, y };
     fileRef.current?.click();
@@ -534,6 +553,7 @@ export function Canvas({
       if (tool === "note") createNote(x, y);
       else if (tool === "image") pickImageAt(x, y);
       else if (tool === "link") setLinkModal({ x, y });
+      else if (tool === "todo") createTodo(x, y);
       return;
     }
 
@@ -614,12 +634,20 @@ export function Canvas({
       dragKey: "link",
       onPlace: () => setLinkModal(viewportCentre()),
     },
+    {
+      key: "todo",
+      label: "To-do",
+      icon: <Icon.TodoIcon />,
+      dragKey: "todo",
+      onPlace: () => createTodo(viewportCentre().x, viewportCentre().y),
+    },
   ];
 
   const isNoteSelected =
     selected && (selected.type === "note" || selected.type === "text");
   const isLinkSelected = selected && selected.type === "link";
   const isImageSelected = selected && selected.type === "image";
+  const isTodoSelected = selected && selected.type === "todo";
   // Merge a hex into the selected element's style, or delete the key when null.
   const setStyleKey = (key: "fill" | "strip", hex: string | null) => {
     if (!selected) return;
@@ -729,6 +757,16 @@ export function Canvas({
           deleteActive={overDelete}
           onDone={deselect}
           onPatch={(p) => patch(selected.id, p as Partial<Element>)}
+          onStrip={(hex) => setStyleKey("strip", hex)}
+          onDelete={() => selectedId && remove(selectedId)}
+        />
+      ) : isTodoSelected ? (
+        <TodoSubRail
+          el={selected}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onFill={(hex) => setStyleKey("fill", hex)}
           onStrip={(hex) => setStyleKey("strip", hex)}
           onDelete={() => selectedId && remove(selectedId)}
         />
@@ -846,6 +884,7 @@ export function Canvas({
                     : undefined
                 }
                 onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
+                onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
                 onCaptionFocus={() => {
                   selectId(el.id);
                   setCaptionEditing(true);
@@ -1013,6 +1052,85 @@ function CaptionField({ html, onText, onRegister, onFocusCaption }: { html: stri
   );
 }
 
+// Checklist body: optional title + checkable, editable items. Enter adds an item below; Backspace
+// on an empty item removes it. Every change patches the whole items array into the Yjs element.
+type Todo = Extract<Element, { type: "todo" }>;
+function TodoBody({ el, onChange }: { el: Todo; onChange: (patch: { title?: string; items?: TodoItem[] }) => void }) {
+  const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [focusId, setFocusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusId && inputs.current[focusId]) {
+      inputs.current[focusId]!.focus();
+      setFocusId(null);
+    }
+  }, [focusId, el.items]);
+
+  const setItems = (items: TodoItem[]) => onChange({ items });
+  const toggle = (id: string) => setItems(el.items.map((it) => (it.id === id ? { ...it, done: !it.done } : it)));
+  const setText = (id: string, text: string) => setItems(el.items.map((it) => (it.id === id ? { ...it, text } : it)));
+  const addAfter = (idx: number) => {
+    const nid = crypto.randomUUID();
+    const items = [...el.items];
+    items.splice(idx + 1, 0, { id: nid, text: "", done: false });
+    setItems(items);
+    setFocusId(nid);
+  };
+  const removeAt = (idx: number) => {
+    if (el.items.length <= 1) return;
+    const prev = el.items[idx - 1]?.id ?? el.items[idx + 1]?.id ?? null;
+    setItems(el.items.filter((_, i) => i !== idx));
+    if (prev) setFocusId(prev);
+  };
+  const stop = (e: React.PointerEvent) => e.stopPropagation();
+
+  return (
+    <div className="flex w-full flex-col gap-1 p-2">
+      <input
+        value={el.title ?? ""}
+        onChange={(e) => onChange({ title: e.target.value })}
+        onPointerDown={stop}
+        placeholder="To-do"
+        className="bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400"
+      />
+      <div className="grid gap-0.5">
+        {el.items.map((it, idx) => (
+          <div key={it.id} className="flex items-center gap-2">
+            <button
+              onPointerDown={stop}
+              onClick={() => toggle(it.id)}
+              aria-label={it.done ? "Mark not done" : "Mark done"}
+              className={`grid h-4 w-4 shrink-0 place-items-center rounded border-2 ${it.done ? "border-primary bg-primary text-white" : "border-slate-300"}`}
+            >
+              {it.done && <Icon.CheckIcon className="text-[10px]" />}
+            </button>
+            <input
+              ref={(node) => (inputs.current[it.id] = node)}
+              value={it.text}
+              onChange={(e) => setText(it.id, e.target.value)}
+              onPointerDown={stop}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addAfter(idx);
+                } else if (e.key === "Backspace" && it.text === "") {
+                  e.preventDefault();
+                  removeAt(idx);
+                }
+              }}
+              placeholder="Item"
+              className={`flex-1 bg-transparent text-xs outline-none placeholder:text-slate-300 ${it.done ? "text-slate-400 line-through" : "text-slate-700"}`}
+            />
+          </div>
+        ))}
+      </div>
+      <button onPointerDown={stop} onClick={() => addAfter(el.items.length - 1)} className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-primary">
+        <Icon.PlusIcon className="text-xs" /> Add item
+      </button>
+    </div>
+  );
+}
+
 function ElementCard({
   el,
   selected,
@@ -1027,6 +1145,7 @@ function ElementCard({
   onOpen,
   onCaption,
   onCaptionFocus,
+  onTodo,
   shrink,
   dragging,
   zoom,
@@ -1047,6 +1166,7 @@ function ElementCard({
   onOpen?: () => void;
   onCaption?: (html: string) => void;
   onCaptionFocus?: () => void;
+  onTodo?: (patch: { title?: string; items?: TodoItem[] }) => void;
   shrink: boolean;
   dragging: boolean;
   zoom: number;
@@ -1107,7 +1227,7 @@ function ElementCard({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   // Links are content-height (toggling preview/caption resizes the card), so resize is width-only.
-  const autoSize = el.type === "link" || el.type === "image"; // content-height (image + caption)
+  const autoSize = el.type === "link" || el.type === "image" || el.type === "todo"; // content-height
   const lockAspect = el.type === "image"; // resize keeps the image's aspect ratio
   const onResizeMove = (e: React.PointerEvent) => {
     if (!size.current) return;
@@ -1149,7 +1269,7 @@ function ElementCard({
         top: el.y,
         width: el.w,
         height: autoSize ? "auto" : el.h,
-        background: isText ? (s.fill ?? "#ffffff") : "#fff",
+        background: isText || el.type === "todo" ? (s.fill ?? "#ffffff") : "#fff",
         zIndex: dragging ? 1000 : undefined,
         transform: shrink ? "scale(0.4)" : undefined,
         transformOrigin: "center",
@@ -1227,6 +1347,11 @@ function ElementCard({
               {linkHost(el.url)}
             </div>
           </div>
+        </div>
+      ) : el.type === "todo" ? (
+        <div className="flex w-full flex-col overflow-hidden">
+          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+          <TodoBody el={el} onChange={(p) => onTodo?.(p)} />
         </div>
       ) : (
         <div className="grid h-full place-items-center text-slate-400">

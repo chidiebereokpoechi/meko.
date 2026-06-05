@@ -29,7 +29,14 @@ export type Element =
   | (Base & { type: "image"; src: string; alt?: string; mediaId?: string; caption?: string; showCaption?: boolean })
   | (Base & { type: "link"; url: string; title?: string; description?: string; image?: string; hideImage?: boolean; hideCaption?: boolean })
   | (Base & { type: "file"; name: string; downloadUrl: string; size: number })
-  | (Base & { type: "embed"; src: string });
+  | (Base & { type: "embed"; src: string })
+  | (Base & { type: "todo"; title?: string; items: TodoItem[] });
+
+export interface TodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
 
 export interface Board {
   id: string;

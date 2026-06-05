@@ -61,6 +61,13 @@ function renderElement(e: Element): string {
       return `<div style="${base};border:2px solid #ccc;padding:6px">${esc(e.name)}</div>`;
     case "embed":
       return `<div style="${base};border:2px dashed #999"></div>`;
+    case "todo": {
+      const rows = e.items
+        .map((it) => `<div style="display:flex;gap:6px;align-items:center">${it.done ? "☑" : "☐"}<span style="${it.done ? "text-decoration:line-through;color:#94a3b8" : ""}">${esc(it.text)}</span></div>`)
+        .join("");
+      const head = e.title ? `<div style="font-weight:bold;margin-bottom:4px">${esc(e.title)}</div>` : "";
+      return `<div style="${base};padding:6px">${head}${rows}</div>`;
+    }
   }
 }
 
