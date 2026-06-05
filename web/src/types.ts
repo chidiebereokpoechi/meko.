@@ -8,6 +8,8 @@ export interface ElementStyle {
   opacity?: number;
   fontSize?: number;
   fontWeight?: "normal" | "bold";
+  color?: string;
+  align?: "left" | "center" | "right";
 }
 
 interface Base {

@@ -38,6 +38,8 @@ function styleAttr(e: Element): string {
     s.opacity != null ? `opacity:${s.opacity}` : "",
     s.fontSize ? `font-size:${s.fontSize}px` : "",
     s.fontWeight ? `font-weight:${s.fontWeight}` : "",
+    s.color ? `color:${s.color}` : "",
+    s.align ? `text-align:${s.align}` : "",
   ].filter(Boolean);
   return decls.join(";");
 }

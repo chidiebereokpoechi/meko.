@@ -16,6 +16,8 @@ const Style = z
     opacity: z.number().min(0).max(1).optional(),
     fontSize: z.number().min(1).max(512).optional(),
     fontWeight: z.enum(["normal", "bold"]).optional(),
+    color: Hex.optional(),
+    align: z.enum(["left", "center", "right"]).optional(),
   })
   .strict();
 
