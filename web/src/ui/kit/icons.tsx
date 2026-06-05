@@ -21,6 +21,9 @@ export const SettingsIcon = svg(<><circle cx="12" cy="12" r="3" /><path d="M12 2
 export const PlusIcon = svg(<path d="M12 5v14M5 12h14" />);
 export const EyeIcon = svg(<><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>);
 export const ChevronDown = svg(<path d="m6 9 6 6 6-6" />);
+export const UndoIcon = svg(<><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></>);
+export const RedoIcon = svg(<><path d="m15 14 5-5-5-5" /><path d="M20 9H9a5 5 0 0 0 0 10h3" /></>);
+export const ShareIcon = svg(<><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><path d="M19 8v6M22 11h-6" /></>);
 export const ArrowLeftIcon = svg(<path d="M19 12H5m0 0 6-6m-6 6 6 6" />);
 export const AlignIcon = svg(<path d="M4 6h16M4 12h10M4 18h16" />);
 export const PaintIcon = svg(<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" /></>);

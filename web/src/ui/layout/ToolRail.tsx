@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Tooltip } from "../kit/index.ts";
+import type { ReactNode, Ref } from "react";
+import { Icon, Tooltip } from "../kit/index.ts";
 
 export interface Tool {
   key: string;
@@ -14,20 +14,33 @@ export interface Tool {
   // `dragKey` is written to the drag payload so the canvas knows what to create on drop.
   onPlace?: () => void;
   dragKey?: string;
+  // Highlight the Delete tool while an element is dragged over it.
+  deleteActive?: boolean;
 }
 
 // Milanote-style vertical rail. Placeable tools are created by double-click or drag (not a single
-// click), matching Milanote. The active tool's square is filled primary.
-export function ToolRail({ tools, bottom = [] }: { tools: Tool[]; bottom?: Tool[] }) {
+// click), matching Milanote. The active tool's square is filled primary. A Delete tool is always
+// pinned to the bottom — it deletes the selection and is the drop target for drag-to-delete.
+export function ToolRail({
+  tools,
+  deleteRef,
+  deleteActive,
+  onDelete,
+}: {
+  tools: Tool[];
+  deleteRef?: Ref<HTMLDivElement>;
+  deleteActive?: boolean;
+  onDelete?: () => void;
+}) {
   return (
     <nav className="flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
       {tools.map((t) => (
         <ToolButton key={t.key} tool={t} />
       ))}
       <span className="flex-1" />
-      {bottom.map((t) => (
-        <ToolButton key={t.key} tool={t} />
-      ))}
+      <div ref={deleteRef} className="flex w-full justify-center">
+        <ToolButton tool={{ key: "delete", label: "Delete", icon: <Icon.TrashIcon />, onClick: onDelete, disabled: !onDelete, deleteActive }} />
+      </div>
     </nav>
   );
 }
@@ -47,9 +60,13 @@ function ToolButton({ tool }: { tool: Tool }) {
       >
         <span
           className={[
-            "grid h-9 w-9 place-items-center rounded-xl text-lg transition-colors",
+            "grid h-9 w-9 place-items-center rounded-xl text-lg transition-all",
             placeable ? "cursor-grab active:cursor-grabbing" : "",
-            tool.active ? "bg-primary text-white" : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-700",
+            tool.deleteActive
+              ? "scale-110 bg-red-500 text-white"
+              : tool.active
+                ? "bg-primary text-white"
+                : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-700",
           ].join(" ")}
         >
           {tool.icon}

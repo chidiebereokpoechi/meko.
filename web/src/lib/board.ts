@@ -12,7 +12,17 @@ export type ConnStatus = "connecting" | "online" | "offline";
 export class BoardConnection {
   readonly doc = new Y.Doc();
   readonly elements = this.doc.getMap<Element>("elements");
+  // Undo/redo over local edits only — remote updates are applied with origin "remote", which the
+  // UndoManager (default trackedOrigins = null/local) ignores, so undo never reverts peers' work.
+  readonly undoMgr = new Y.UndoManager(this.elements);
   onStatus?: (s: ConnStatus) => void;
+
+  undo() {
+    this.undoMgr.undo();
+  }
+  redo() {
+    this.undoMgr.redo();
+  }
 
   private ws: WebSocket | null = null;
   private closed = false;

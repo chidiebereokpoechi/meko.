@@ -8,11 +8,20 @@ import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
 
-export function Canvas({ boardId }: { boardId: string }) {
+export interface BoardControls {
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  exportPng: () => void;
+}
+
+export function Canvas({ boardId, onControls }: { boardId: string; onControls: (c: BoardControls | null) => void }) {
   const connRef = useRef<BoardConnection | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const deleteRef = useRef<HTMLDivElement>(null);
   const dropCoords = useRef<{ x: number; y: number } | null>(null);
   const editorRef = useRef<ActiveEditor | null>(null);
   const [, setTick] = useState(0);
@@ -21,6 +30,8 @@ export function Canvas({ boardId }: { boardId: string }) {
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [overDelete, setOverDelete] = useState(false);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -28,11 +39,22 @@ export function Canvas({ boardId }: { boardId: string }) {
     c.onStatus = setStatus;
     const bump = () => setTick((t) => t + 1);
     c.elements.observe(bump);
+
+    // Surface undo/redo state to the top bar.
+    const mgr = c.undoMgr;
+    const pushControls = () => onControls({ undo: () => c.undo(), redo: () => c.redo(), canUndo: mgr.canUndo(), canRedo: mgr.canRedo(), exportPng: () => onExport() });
+    mgr.on("stack-item-added", pushControls);
+    mgr.on("stack-item-popped", pushControls);
+    pushControls();
+
     void c.connect();
     return () => {
+      mgr.off("stack-item-added", pushControls);
+      mgr.off("stack-item-popped", pushControls);
       c.elements.unobserve(bump);
       c.destroy();
       connRef.current = null;
+      onControls(null);
     };
   }, [boardId]);
 
@@ -62,6 +84,57 @@ export function Canvas({ boardId }: { boardId: string }) {
     setSelectedId(null);
     setEditingId(null);
   };
+
+  const overDeleteZone = (x: number, y: number) => {
+    const r = deleteRef.current?.getBoundingClientRect();
+    return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  };
+  const handleDragMove = (id: string, x: number, y: number) => {
+    setDraggingId(id);
+    setOverDelete(overDeleteZone(x, y));
+  };
+  // Drop over the Delete tool removes the element; otherwise just end the drag.
+  const handleDragRelease = (id: string, x: number, y: number) => {
+    if (overDeleteZone(x, y)) remove(id);
+    setDraggingId(null);
+    setOverDelete(false);
+  };
+
+  // Backspace/Delete removes the selected element — unless a text field is focused (editing).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Backspace" && e.key !== "Delete") return;
+      if (editingId) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      if (selectedId) {
+        e.preventDefault();
+        remove(selectedId);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId, editingId]);
+
+  // Undo/redo hotkeys: ⌘/Ctrl+Z, and ⌘/Ctrl+Y or ⇧⌘/Ctrl+Z. Skipped while typing so the browser
+  // handles in-note text undo instead.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        connRef.current?.undo();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        connRef.current?.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Run a rich-text command on the focused note editor, then persist its sanitised HTML.
   const exec = (command: string, value?: string) => {
@@ -138,7 +211,6 @@ export function Canvas({ boardId }: { boardId: string }) {
   const createTools: Tool[] = [
     { key: "note", label: "Note", icon: <Icon.NoteIcon />, dragKey: "note", onPlace: () => createNote(viewportCentre().x, viewportCentre().y) },
     { key: "image", label: "Image", icon: <Icon.ImageIcon />, dragKey: "image", onPlace: () => pickImageAt(viewportCentre().x, viewportCentre().y), disabled: busy },
-    { key: "export", label: "Export", icon: <Icon.ExportIcon />, onClick: onExport, disabled: busy },
   ];
 
   const isNoteSelected = selected && (selected.type === "note" || selected.type === "text");
@@ -146,9 +218,9 @@ export function Canvas({ boardId }: { boardId: string }) {
   return (
     <div className="flex flex-1 overflow-hidden">
       {isNoteSelected ? (
-        <NoteSubRail el={selected} editing={editingId === selected.id} onDone={deselect} onExec={exec} onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)} onDelete={() => remove(selected.id)} />
+        <NoteSubRail el={selected} editing={editingId === selected.id} deleteRef={deleteRef} deleteActive={overDelete} onDone={deselect} onExec={exec} onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)} onDelete={() => selectedId && remove(selectedId)} />
       ) : (
-        <ToolRail tools={createTools} />
+        <ToolRail tools={createTools} deleteRef={deleteRef} deleteActive={overDelete} onDelete={selectedId ? () => remove(selectedId) : undefined} />
       )}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickImage} />
 
@@ -171,6 +243,9 @@ export function Canvas({ boardId }: { boardId: string }) {
                 onResize={(w, h) => patch(el.id, { w, h })}
                 onText={(text) => patch(el.id, { text } as Partial<Element>)}
                 onRegister={(e) => (editorRef.current = e)}
+                shrink={draggingId === el.id && overDelete}
+                onDragMove={(x, y) => handleDragMove(el.id, x, y)}
+                onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
               />
             ))}
           </div>
@@ -191,6 +266,9 @@ function ElementCard({
   onResize,
   onText,
   onRegister,
+  shrink,
+  onDragMove,
+  onDragRelease,
 }: {
   el: Element;
   selected: boolean;
@@ -202,11 +280,17 @@ function ElementCard({
   onResize: (w: number, h: number) => void;
   onText: (t: string) => void;
   onRegister: (e: ActiveEditor | null) => void;
+  shrink: boolean;
+  onDragMove: (x: number, y: number) => void;
+  onDragRelease: (x: number, y: number) => void;
 }) {
   const move = useRef<{ dx: number; dy: number } | null>(null);
   const size = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const justSelected = useRef(false);
   const dragged = useRef(false);
+  // While dragging we render the card position:fixed at screen coords so it escapes the canvas's
+  // overflow clip and overlays the rail. ox/oy keep the cursor at its grab point on the card.
+  const [drag, setDrag] = useState<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const isText = el.type === "note" || el.type === "text";
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -216,15 +300,23 @@ function ElementCard({
     if (!selected) onSelect();
     if (!editing) {
       move.current = { dx: e.clientX - el.x, dy: e.clientY - el.y };
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setDrag({ x: e.clientX, y: e.clientY, ox: e.clientX - r.left, oy: e.clientY - r.top });
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!move.current) return;
     dragged.current = true;
+    setDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
     onMove(Math.round(e.clientX - move.current.dx), Math.round(e.clientY - move.current.dy));
+    onDragMove(e.clientX, e.clientY);
   };
-  const onPointerUp = () => (move.current = null);
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (move.current && dragged.current) onDragRelease(e.clientX, e.clientY);
+    move.current = null;
+    setDrag(null);
+  };
   // First click selects; a second click (already selected, no drag) enters edit mode.
   const onClick = () => {
     if (isText && !justSelected.current && !editing && !dragged.current) onEdit();
@@ -253,8 +345,22 @@ function ElementCard({
       onPointerUp={onPointerUp}
       onClick={onClick}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
-      className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"}`}
-      style={{ left: el.x, top: el.y, width: el.w, height: el.h, background: isText ? s.fill ?? "#ffffff" : "#fff" }}
+      // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
+      className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${drag ? "opacity-80 shadow-xl" : ""}`}
+      style={{
+        // position:fixed (drag) overrides the `absolute` class, escaping the canvas overflow clip
+        // so the card floats over the rail/top bar.
+        position: drag ? "fixed" : undefined,
+        left: drag ? drag.x - drag.ox : el.x,
+        top: drag ? drag.y - drag.oy : el.y,
+        width: el.w,
+        height: el.h,
+        background: isText ? s.fill ?? "#ffffff" : "#fff",
+        zIndex: drag ? 2000 : undefined,
+        transform: shrink ? "scale(0.4)" : undefined,
+        transformOrigin: "center",
+        transition: "transform 0.12s ease",
+      }}
     >
       {isText ? (
         <EditableNote id={el.id} html={el.type === "note" || el.type === "text" ? el.text : ""} editing={editing} style={textStyle} onText={onText} onRegister={onRegister} />

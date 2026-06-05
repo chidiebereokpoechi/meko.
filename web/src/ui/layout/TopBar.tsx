@@ -1,5 +1,5 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
-import { Icon } from "../kit/index.ts";
+import { Icon, toast } from "../kit/index.ts";
 import type { Workspace } from "../../types.ts";
 
 // Milanote-style full-width bar: logo + breadcrumb (workspace switcher) on the left, action icons
@@ -12,6 +12,11 @@ export function TopBar({
   crumb,
   onHome,
   onLogout,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
+  onExport,
 }: {
   workspaces: (Workspace & { role: string })[];
   activeWs: string | null;
@@ -20,9 +25,15 @@ export function TopBar({
   crumb?: string;
   onHome: () => void;
   onLogout: () => void;
+  undo?: () => void;
+  redo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onExport?: () => void;
 }) {
   const active = workspaces.find((w) => w.id === activeWs);
   return (
+    <div>
     <header className="flex h-14 items-center gap-3 border-b-2 border-slate-100 bg-slate-100 px-4">
       <button onClick={onHome} className="grid h-7 w-7 place-items-center rounded-lg bg-primary font-bold text-white">
         m
@@ -60,6 +71,17 @@ export function TopBar({
 
       <span className="flex-1" />
 
+      {undo && (
+        <div className="mr-1 flex items-center gap-1 text-slate-400">
+          <IconBtn label="Undo" onClick={undo} disabled={!canUndo}>
+            <Icon.UndoIcon className="text-lg" />
+          </IconBtn>
+          <IconBtn label="Redo" onClick={redo} disabled={!canRedo}>
+            <Icon.RedoIcon className="text-lg" />
+          </IconBtn>
+        </div>
+      )}
+
       <div className="flex items-center gap-1 text-slate-400">
         <IconBtn label="Search">
           <Icon.SearchIcon className="text-lg" />
@@ -78,12 +100,28 @@ export function TopBar({
         Log out
       </button>
     </header>
+
+      {/* Board actions row (canvas view). */}
+      {onExport && (
+        <div className="flex items-center justify-end gap-2 border-b-2 border-slate-100 bg-white px-4 py-2">
+          <button className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100" onClick={() => toast("Sharing coming soon")}>
+            <Icon.ShareIcon className="text-base" /> Share
+          </button>
+          <button className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100" onClick={onExport}>
+            <Icon.ExportIcon className="text-base" /> Export
+          </button>
+          <button className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100" onClick={() => toast("View options coming soon")}>
+            View <Icon.ChevronDown className="text-base" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
-function IconBtn({ label, children }: { label: string; children: React.ReactNode }) {
+function IconBtn({ label, children, onClick, disabled }: { label: string; children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
   return (
-    <button aria-label={label} title={label} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-slate-200 hover:text-slate-600">
+    <button aria-label={label} title={label} onClick={onClick} disabled={disabled} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-slate-200 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
       {children}
     </button>
   );

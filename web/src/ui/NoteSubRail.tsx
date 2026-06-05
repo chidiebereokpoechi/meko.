@@ -3,12 +3,37 @@ import type { Element } from "../types.ts";
 import { ColorPicker, Icon, Tooltip } from "./kit/index.ts";
 
 // Block (paragraph) styles applied via execCommand formatBlock.
-const BLOCKS: { label: string; tag: string; shortcut?: string; className: string }[] = [
-  { label: "Large heading", tag: "H1", shortcut: "⌘⇧1", className: "text-xl font-bold" },
-  { label: "Normal heading", tag: "H2", shortcut: "⌘⇧2", className: "text-base font-bold" },
+const BLOCKS: {
+  label: string;
+  tag: string;
+  shortcut?: string;
+  className: string;
+}[] = [
+  {
+    label: "Large heading",
+    tag: "H1",
+    shortcut: "⌘⇧1",
+    className: "text-xl font-bold",
+  },
+  {
+    label: "Normal heading",
+    tag: "H2",
+    shortcut: "⌘⇧2",
+    className: "text-base font-bold",
+  },
   { label: "Normal text", tag: "P", className: "text-xs" },
-  { label: "Code block", tag: "PRE", shortcut: "⌘>", className: "font-mono text-xs" },
-  { label: "Quote block", tag: "BLOCKQUOTE", shortcut: '⌘"', className: "text-xs italic" },
+  {
+    label: "Code block",
+    tag: "PRE",
+    shortcut: "⌘>",
+    className: "font-mono text-xs",
+  },
+  {
+    label: "Quote block",
+    tag: "BLOCKQUOTE",
+    shortcut: '⌘"',
+    className: "text-xs italic",
+  },
 ];
 
 // Contextual note rail (Milanote). Selecting a note shows Color (background) only; while the caret
@@ -16,6 +41,8 @@ const BLOCKS: { label: string; tag: string; shortcut?: string; className: string
 export function NoteSubRail({
   el,
   editing,
+  deleteRef,
+  deleteActive,
   onDone,
   onExec,
   onFill,
@@ -23,6 +50,8 @@ export function NoteSubRail({
 }: {
   el: Element;
   editing: boolean;
+  deleteRef?: React.Ref<HTMLDivElement>;
+  deleteActive?: boolean;
   onDone: () => void;
   onExec: (command: string, value?: string) => void;
   onFill: (hex: string) => void;
@@ -54,24 +83,97 @@ export function NoteSubRail({
       {editing ? (
         <>
           <div ref={styleRef} className="flex w-full justify-center">
-            <RailBtn label="Text style" active={styleOpen} icon={<span className="font-serif text-base font-bold leading-none">T<span className="text-[0.7em]">t</span></span>} onClick={() => setStyleOpen((o) => !o)} />
+            <RailBtn
+              label="Text style"
+              active={styleOpen}
+              icon={
+                <span className="font-serif text-base font-bold leading-none">
+                  T<span className="text-[0.7em]">t</span>
+                </span>
+              }
+              onClick={() => setStyleOpen((o) => !o)}
+            />
           </div>
-          <RailBtn hideCaption label="Bold" shortcut="⌘B" active={on("bold")} icon={<span className="font-black">B</span>} onClick={() => onExec("bold")} />
-          <RailBtn hideCaption label="Italic" shortcut="⌘I" active={on("italic")} icon={<span className="font-serif italic">I</span>} onClick={() => onExec("italic")} />
-          <RailBtn hideCaption label="Strikethrough" active={on("strikeThrough")} icon={<span className="font-bold line-through">S</span>} onClick={() => onExec("strikeThrough")} />
-          <RailBtn hideCaption label="Underline" shortcut="⌘U" active={on("underline")} icon={<span className="font-bold underline">U</span>} onClick={() => onExec("underline")} />
-          <RailBtn hideCaption label="Bulleted list" active={on("insertUnorderedList")} icon={<Icon.BulletListIcon />} onClick={() => onExec("insertUnorderedList")} />
-          <RailBtn hideCaption label="Numbered list" active={on("insertOrderedList")} icon={<Icon.NumberListIcon />} onClick={() => onExec("insertOrderedList")} />
-          <RailBtn hideCaption label="Align" icon={<Icon.AlignIcon />} onClick={() => onExec(on("justifyCenter") ? "justifyRight" : on("justifyRight") ? "justifyLeft" : "justifyCenter")} />
+          <RailBtn
+            hideCaption
+            label="Bold"
+            shortcut="⌘B"
+            active={on("bold")}
+            icon={<span className="font-black">B</span>}
+            onClick={() => onExec("bold")}
+          />
+          <RailBtn
+            hideCaption
+            label="Italic"
+            shortcut="⌘I"
+            active={on("italic")}
+            icon={<span className="font-serif italic">I</span>}
+            onClick={() => onExec("italic")}
+          />
+          <RailBtn
+            hideCaption
+            label="Strikethrough"
+            active={on("strikeThrough")}
+            icon={<span className="font-bold line-through">S</span>}
+            onClick={() => onExec("strikeThrough")}
+          />
+          <RailBtn
+            hideCaption
+            label="Underline"
+            shortcut="⌘U"
+            active={on("underline")}
+            icon={<span className="font-bold underline">U</span>}
+            onClick={() => onExec("underline")}
+          />
+          <RailBtn
+            hideCaption
+            label="Bulleted list"
+            active={on("insertUnorderedList")}
+            icon={<Icon.BulletListIcon />}
+            onClick={() => onExec("insertUnorderedList")}
+          />
+          <RailBtn
+            hideCaption
+            label="Numbered list"
+            active={on("insertOrderedList")}
+            icon={<Icon.NumberListIcon />}
+            onClick={() => onExec("insertOrderedList")}
+          />
+          <RailBtn
+            hideCaption
+            label="Align"
+            icon={<Icon.AlignIcon />}
+            onClick={() =>
+              onExec(
+                on("justifyCenter")
+                  ? "justifyRight"
+                  : on("justifyRight")
+                    ? "justifyLeft"
+                    : "justifyCenter",
+              )
+            }
+          />
         </>
       ) : (
         <div ref={colorRef} className="flex w-full justify-center">
-          <RailBtn label="Color" active={colorOpen} icon={<span className="block h-5 w-5 rounded-md ring-1 ring-inset ring-slate-300" style={{ background: el.style?.fill ?? "#ffffff" }} />} onClick={() => setColorOpen((o) => !o)} />
+          <RailBtn
+            label="Color"
+            active={colorOpen}
+            icon={
+              <span
+                className="block h-5 w-5 rounded-md ring-2 ring-inset ring-slate-300"
+                style={{ background: el.style?.fill ?? "#ffffff" }}
+              />
+            }
+            onClick={() => setColorOpen((o) => !o)}
+          />
         </div>
       )}
 
       <span className="flex-1" />
-      <RailBtn label="Delete" icon={<Icon.TrashIcon />} onClick={onDelete} />
+      <div ref={deleteRef} className="flex w-full justify-center">
+        <RailBtn label="Delete" icon={<Icon.TrashIcon />} dangerActive={deleteActive} onClick={onDelete} />
+      </div>
 
       {colorOpen && !editing && (
         <Popover top={colorRef.current?.offsetTop ?? 0}>
@@ -100,11 +202,37 @@ export function NoteSubRail({
 
 // `label` is always used for the hover tooltip; the visible caption under the icon is optional
 // (omitted for standard inline text tools like Bold/Italic, shown for Done/Text style/Color/Delete).
-const RailBtn = ({ label, shortcut, icon, active, hideCaption, onClick }: { label: string; shortcut?: string; icon: ReactNode; active?: boolean; hideCaption?: boolean; onClick: () => void }) => (
+const RailBtn = ({
+  label,
+  shortcut,
+  icon,
+  active,
+  dangerActive,
+  hideCaption,
+  onClick,
+}: {
+  label: string;
+  shortcut?: string;
+  icon: ReactNode;
+  active?: boolean;
+  dangerActive?: boolean;
+  hideCaption?: boolean;
+  onClick: () => void;
+}) => (
   <Tooltip label={label} shortcut={shortcut}>
-    <button onMouseDown={(e) => e.preventDefault()} onClick={onClick} className="group flex w-full flex-col items-center gap-1 py-1.5">
-      <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg transition-colors ${active ? "bg-primary text-white" : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-700"}`}>{icon}</span>
-      {!hideCaption && <span className="text-[10px] font-bold text-slate-400">{label}</span>}
+    <button
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className="group flex w-full flex-col items-center gap-1 py-1.5"
+    >
+      <span
+        className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg transition-all ${dangerActive ? "scale-110 bg-red-500 text-white" : active ? "bg-primary text-white" : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-700"}`}
+      >
+        {icon}
+      </span>
+      {!hideCaption && (
+        <span className="text-[10px] font-bold text-slate-400">{label}</span>
+      )}
     </button>
   </Tooltip>
 );
@@ -113,52 +241,95 @@ const RailBtn = ({ label, shortcut, icon, active, hideCaption, onClick }: { labe
 // deselecting the note — no explicit close button.
 function Popover({ top, children }: { top: number; children: ReactNode }) {
   return (
-    <div className="absolute left-full z-50 ml-2 max-h-[80vh] w-72 overflow-auto rounded-lg border-2 border-slate-200 bg-slate-50 p-5 shadow-lg" style={{ top }} onMouseDown={(e) => e.preventDefault()}>
+    <div
+      className="absolute left-full z-50 ml-2 max-h-[80vh] w-72 overflow-auto rounded-lg border-2 border-slate-200 bg-slate-50 p-5 shadow-lg"
+      style={{ top }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
       {children}
     </div>
   );
 }
 
 // Text colour swatches shown as a coloured letter "A" (Milanote text-style pattern).
-const TEXT_COLORS = ["#1f2937", "#475569", "#94a3b8", "#dc2626", "#e8924a", "#16a34a", "#2563eb", "#6e24ff", "#d7658b"];
+const TEXT_COLORS = [
+  "#1f2937",
+  "#475569",
+  "#94a3b8",
+  "#dc2626",
+  "#e8924a",
+  "#16a34a",
+  "#2563eb",
+  "#6e24ff",
+  "#d7658b",
+];
 function ATextColors({ onPick }: { onPick: (c: string) => void }) {
   return (
     <div className="grid grid-cols-6 gap-2">
       {TEXT_COLORS.map((c) => (
-        <button key={c} onClick={() => onPick(c)} className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-slate-200 bg-white hover:border-primary/40">
-          <span className="font-black" style={{ color: c }}>A</span>
+        <button
+          key={c}
+          onClick={() => onPick(c)}
+          className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-slate-200 bg-white hover:border-primary/40"
+        >
+          <span className="font-black" style={{ color: c }}>
+            A
+          </span>
         </button>
       ))}
     </div>
   );
 }
 
-const Section = ({ label, children }: { label: string; children: ReactNode }) => (
+const Section = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) => (
   <div className="flex flex-col gap-3">
     <div className="text-xs font-bold text-slate-400">{label}</div>
     {children}
   </div>
 );
 
-function StyleBlocks({ onExec }: { onExec: (command: string, value?: string) => void }) {
+function StyleBlocks({
+  onExec,
+}: {
+  onExec: (command: string, value?: string) => void;
+}) {
   let current = "";
   try {
-    current = document.queryCommandValue("formatBlock").toString().toLowerCase();
+    current = document
+      .queryCommandValue("formatBlock")
+      .toString()
+      .toLowerCase();
   } catch {
     /* unsupported */
   }
   const isActive = (tag: string) => {
     const t = tag.toLowerCase();
-    return t === current || (t === "p" && (current === "" || current === "div"));
+    return (
+      t === current || (t === "p" && (current === "" || current === "div"))
+    );
   };
   return (
     <div className="flex flex-col">
       {BLOCKS.map((b) => {
         const active = isActive(b.tag);
         return (
-          <button key={b.tag} onClick={() => onExec("formatBlock", b.tag)} className={`flex items-center justify-between rounded-lg px-3 py-2 ${active ? "bg-slate-200/60" : "hover:bg-slate-100"}`}>
+          <button
+            key={b.tag}
+            onClick={() => onExec("formatBlock", b.tag)}
+            className={`flex items-center justify-between rounded-lg px-3 py-2 ${active ? "bg-slate-200/60" : "hover:bg-slate-100"}`}
+          >
             <span className={`text-slate-700 ${b.className}`}>{b.label}</span>
-            {active ? <span className="font-bold text-slate-700">✓</span> : b.shortcut ? <span className="text-xs text-slate-300">{b.shortcut}</span> : null}
+            {active ? (
+              <span className="font-bold text-slate-700">✓</span>
+            ) : b.shortcut ? (
+              <span className="text-xs text-slate-300">{b.shortcut}</span>
+            ) : null}
           </button>
         );
       })}
