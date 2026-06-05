@@ -1,4 +1,4 @@
-# Meko
+# meko.
 
 Self-hostable realtime collaborative canvas. Board state is a [Yjs](https://yjs.dev) CRDT
 persisted to Postgres and synchronised across multiple WebSocket nodes via Redis pub/sub.

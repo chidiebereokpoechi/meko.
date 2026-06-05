@@ -1,0 +1,41 @@
+// Client mirror of the server element model (src/elements/schema.ts). Elements live in the board's
+// Yjs doc under the "elements" Y.Map, keyed by id — the same shape the server validates and the
+// export renderer reads.
+export interface ElementStyle {
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  opacity?: number;
+  fontSize?: number;
+  fontWeight?: "normal" | "bold";
+}
+
+interface Base {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation?: number;
+  style?: ElementStyle;
+}
+
+export type Element =
+  | (Base & { type: "note"; text: string })
+  | (Base & { type: "text"; text: string })
+  | (Base & { type: "image"; src: string; alt?: string })
+  | (Base & { type: "link"; url: string; title?: string })
+  | (Base & { type: "file"; name: string; downloadUrl: string; size: number })
+  | (Base & { type: "embed"; src: string });
+
+export interface Board {
+  id: string;
+  workspaceId: string;
+  title: string;
+  updatedAt: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+}

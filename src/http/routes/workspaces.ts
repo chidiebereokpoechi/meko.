@@ -10,6 +10,15 @@ const EDIT_ROLES = new Set(["owner", "admin", "editor"]);
 
 export const workspaceRoutes = new Elysia({ prefix: "/api" })
   .use(requireAuth)
+  // Workspaces the user belongs to, with their role.
+  .get("/workspaces", async ({ userId }) => {
+    return db
+      .select({ id: workspaces.id, name: workspaces.name, role: members.role })
+      .from(members)
+      .innerJoin(workspaces, eq(workspaces.id, members.workspaceId))
+      .where(eq(members.userId, userId!))
+      .orderBy(desc(workspaces.createdAt));
+  })
   // Create a workspace; the creator becomes its owner member.
   .post(
     "/workspaces",

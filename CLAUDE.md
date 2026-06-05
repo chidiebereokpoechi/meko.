@@ -2,9 +2,9 @@
 
 Guidance for Claude Code (and humans) working in this repo.
 
-## What Meko is
+## What meko. is
 
-Meko is a self-hostable **realtime collaborative canvas** (think whiteboard / infinite
+meko. is a self-hostable **realtime collaborative canvas** (think whiteboard / infinite
 canvas with notes, images, links, embeds). Multiple users edit the same board live; state
 is a Yjs CRDT persisted to Postgres. It must run correctly across **multiple WebSocket
 nodes** behind a load balancer.
@@ -15,18 +15,18 @@ two would conflict, **v4 wins**. Section references below (e.g. §3e) point into
 
 ## Stack
 
-| Concern        | Choice                                                        |
-|----------------|---------------------------------------------------------------|
-| Runtime        | **Bun** (TypeScript, ESM, `.ts` imports)                      |
-| HTTP + WS      | **Elysia** (Bun-native; `.ws()` carries the Yjs socket)       |
-| Realtime       | **Yjs** over native WebSocket, multi-node via Redis pub/sub   |
-| DB             | **Postgres 16** via **Drizzle ORM**, pooled by **PgBouncer**  |
-| Cache/bus      | **Redis** (ioredis) — pub/sub, WS tickets, rate-limit store   |
-| Validation     | **Zod**                                                       |
-| Logging        | **pino** + `AsyncLocalStorage` request context               |
-| Media          | S3-compatible object store, Sharp for transcode (Phase 4)     |
-| Export         | Chromium sidecar (Puppeteer), network-isolated (Phase 7)      |
-| TLS            | nginx reverse proxy sidecar                                   |
+| Concern    | Choice                                                       |
+| ---------- | ------------------------------------------------------------ |
+| Runtime    | **Bun** (TypeScript, ESM, `.ts` imports)                     |
+| HTTP + WS  | **Elysia** (Bun-native; `.ws()` carries the Yjs socket)      |
+| Realtime   | **Yjs** over native WebSocket, multi-node via Redis pub/sub  |
+| DB         | **Postgres 16** via **Drizzle ORM**, pooled by **PgBouncer** |
+| Cache/bus  | **Redis** (ioredis) — pub/sub, WS tickets, rate-limit store  |
+| Validation | **Zod**                                                      |
+| Logging    | **pino** + `AsyncLocalStorage` request context               |
+| Media      | S3-compatible object store, Sharp for transcode (Phase 4)    |
+| Export     | Chromium sidecar (Puppeteer), network-isolated (Phase 7)     |
+| TLS        | nginx reverse proxy sidecar                                  |
 
 ## Layout
 
@@ -68,8 +68,8 @@ These are the load-bearing correctness/security rules from v4. Do not regress th
    `POSTGRES_DIRECT_URL` (db:5432), never `DATABASE_URL` (pgbouncer:6432). Transaction-scoped
    `pg_try_advisory_xact_lock` is safe through PgBouncer. (§3d/3h)
 2. **Every Yjs update is broadcast to all nodes** over Redis `room:{boardId}`. A node skips
-   its own messages and ignores boards it has no local clients for. Redis is the *incremental
-   bus*; Postgres (snapshot + `yjs_updates`) is the source of truth. On first client for a
+   its own messages and ignores boards it has no local clients for. Redis is the _incremental
+   bus_; Postgres (snapshot + `yjs_updates`) is the source of truth. On first client for a
    board, hydrate the `Y.Doc` from the DB, never from Redis. (§3e)
 3. **WebSocket auth: validate `Origin` on upgrade + single-use Redis ticket.** No JWT in the
    URL query string. Client opens WS, sends `{type:"auth",ticket}` within 5s, server redeems
@@ -85,7 +85,7 @@ These are the load-bearing correctness/security rules from v4. Do not regress th
 7. **Yjs doc size gate** before applying any inbound update; reject over `MEKO_MAX_BOARD_BYTES`
    (default 50MB), warn at 80%. (§4e)
 8. **Job claim uses `FOR UPDATE SKIP LOCKED`** as a single atomic `UPDATE ... WHERE id = (SELECT
-   ... SKIP LOCKED)`. Exhausted jobs go to status `dead` (dead-letter), not silent failure. (§12o/12n)
+... SKIP LOCKED)`. Exhausted jobs go to status `dead` (dead-letter), not silent failure. (§12o/12n)
 9. **Security headers + CSP + explicit CORS on every response.** Never
    `Access-Control-Allow-Origin: *` with credentials. (§12j/12k/12l)
 10. **Global request timeout** so a slow query can't pin a DB connection and exhaust the pool. (§12p)
@@ -143,7 +143,7 @@ Building per v4 §15.
 
 - **Phase 5 (links & unfurling) — done.** SSRF guard (`src/lib/ssrf.ts`): `isPrivateIp` covers
   IPv4/IPv6 private/reserved/loopback/link-local (incl. `169.254.169.254` metadata) + v4-mapped
-  IPv6; `ssrfSafeUrl` resolves DNS and rejects if *any* address is non-public. Unfurl
+  IPv6; `ssrfSafeUrl` resolves DNS and rejects if _any_ address is non-public. Unfurl
   (`src/links/unfurl.ts`): manual redirect following with a per-hop SSRF re-check, 5s timeout,
   512KB body cap, pure `parseOpenGraph`. Route validates `SafeUrl` at the write path, edit-gated,
   60/hr/user, 24h cache in `unfurls` (stores `resolvedIp` so reads never re-resolve, §7e).

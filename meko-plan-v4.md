@@ -1,4 +1,4 @@
-# Meko — planning & architecture (v4)
+# meko. — planning & architecture (v4)
 
 > **Legend:** ✅ addition/improvement · ⚠️ concern addressed · 🔴 critical risk · 🆕 new in v4
 >
@@ -9,34 +9,34 @@
 
 ## Summary of v4 changes
 
-| # | Area | Severity | Issue |
-|---|------|----------|-------|
-| A | PgBouncer + advisory lock conflict | 🔴 | Session-level advisory lock in §12h is broken when routed through PgBouncer transaction mode |
-| B | WebSocket CSRF fix not specified | 🔴 | v3 identifies the problem (item D) but never provides a concrete fix |
-| C | Client-side token storage | 🔴 | No spec for where access tokens live on the client; localStorage = XSS game-over |
-| D | Multi-node Yjs divergence | 🔴 | Two WS nodes handling the same board have divergent in-memory Y.Doc; Redis pub/sub mentioned but never specified |
-| E | Missing Content Security Policy | ⚠️ | No CSP header; XSS on a canvas app with user-supplied content is catastrophic |
-| F | `javascript:` scheme in link elements | ⚠️ | URL validation must explicitly block `javascript:`, `data:`, `vbscript:` before unfurl and before rendering |
-| G | Job queue `SELECT FOR UPDATE` hotspot | ⚠️ | Missing `SKIP LOCKED`; worker contention serialises all job claims under load |
-| H | PgBouncer breaks `pg_advisory_lock` in migration runner | ⚠️ | Duplicate of A but specifically: migrator must connect to `db:5432` not `pgbouncer:6432` |
-| I | SVG served as `<img>` is not fully safe | ⚠️ | Some browsers execute scripts in same-origin SVGs loaded via `<img>`; must transcode or sandbox |
-| J | Missing health check endpoints | 🆕 | No `/healthz` / `/readyz` for load balancer probes and rolling deploys |
-| K | Missing structured logging | 🆕 | No logging strategy; correlating security incidents without structured logs is impossible |
-| L | Missing autovacuum tuning | 🆕 | High-churn tables (`jobs`, `yjs_updates`, `refresh_tokens`) will bloat without custom `autovacuum` settings |
-| M | Missing database backup strategy | 🆕 | No backup/restore spec for self-hosted deployments |
-| N | Missing cursor-based pagination | 🆕 | No pagination spec; a large workspace returns all boards/elements in one query |
-| O | Missing HTTPS/TLS spec | 🆕 | No TLS termination or HTTP-to-HTTPS redirect strategy |
-| P | CORS policy not specified | 🆕 | No explicit CORS config; defaults vary by framework and allow credential-carrying cross-origin requests |
-| Q | Missing security headers | 🆕 | HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy — none specified |
-| R | Chromium export sidecar runs as root | 🆕 | Default Docker image runs Chromium as root; needs non-root user + network egress policy |
-| S | Missing global API request timeout | 🆕 | Long-running requests exhaust the DB connection pool with no timeout backstop |
-| T | Missing Yjs document size limit | 🆕 | No max Y.Doc size; a board with millions of elements exhausts server memory |
-| U | Missing job dead-letter queue | 🆕 | After `max_attempts`, failed jobs sit silently; no alerting or operator visibility |
-| V | Missing yjs_snapshots retention logic | 🆕 | "Keep N most recent via trigger or post-compaction cleanup" — implementation never given |
-| W | Rate limiting by user ID for authed routes | 🆕 | IP-only rate limiting is evaded via IP rotation; authenticated routes must also rate-limit by user ID |
-| X | Missing Yjs time-based compaction | 🆕 | Boards that always have ≥1 client connected never compact; need a time-based trigger |
-| Y | Refresh token rotation on every use | ⚠️ | v3 only rotates on reuse detection; rotation must happen on every valid refresh |
-| Z | Missing circuit breaker for S3/email | 🆕 | No resilience pattern for external service failure cascading into the job queue |
+| #   | Area                                                    | Severity | Issue                                                                                                            |
+| --- | ------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| A   | PgBouncer + advisory lock conflict                      | 🔴       | Session-level advisory lock in §12h is broken when routed through PgBouncer transaction mode                     |
+| B   | WebSocket CSRF fix not specified                        | 🔴       | v3 identifies the problem (item D) but never provides a concrete fix                                             |
+| C   | Client-side token storage                               | 🔴       | No spec for where access tokens live on the client; localStorage = XSS game-over                                 |
+| D   | Multi-node Yjs divergence                               | 🔴       | Two WS nodes handling the same board have divergent in-memory Y.Doc; Redis pub/sub mentioned but never specified |
+| E   | Missing Content Security Policy                         | ⚠️       | No CSP header; XSS on a canvas app with user-supplied content is catastrophic                                    |
+| F   | `javascript:` scheme in link elements                   | ⚠️       | URL validation must explicitly block `javascript:`, `data:`, `vbscript:` before unfurl and before rendering      |
+| G   | Job queue `SELECT FOR UPDATE` hotspot                   | ⚠️       | Missing `SKIP LOCKED`; worker contention serialises all job claims under load                                    |
+| H   | PgBouncer breaks `pg_advisory_lock` in migration runner | ⚠️       | Duplicate of A but specifically: migrator must connect to `db:5432` not `pgbouncer:6432`                         |
+| I   | SVG served as `<img>` is not fully safe                 | ⚠️       | Some browsers execute scripts in same-origin SVGs loaded via `<img>`; must transcode or sandbox                  |
+| J   | Missing health check endpoints                          | 🆕       | No `/healthz` / `/readyz` for load balancer probes and rolling deploys                                           |
+| K   | Missing structured logging                              | 🆕       | No logging strategy; correlating security incidents without structured logs is impossible                        |
+| L   | Missing autovacuum tuning                               | 🆕       | High-churn tables (`jobs`, `yjs_updates`, `refresh_tokens`) will bloat without custom `autovacuum` settings      |
+| M   | Missing database backup strategy                        | 🆕       | No backup/restore spec for self-hosted deployments                                                               |
+| N   | Missing cursor-based pagination                         | 🆕       | No pagination spec; a large workspace returns all boards/elements in one query                                   |
+| O   | Missing HTTPS/TLS spec                                  | 🆕       | No TLS termination or HTTP-to-HTTPS redirect strategy                                                            |
+| P   | CORS policy not specified                               | 🆕       | No explicit CORS config; defaults vary by framework and allow credential-carrying cross-origin requests          |
+| Q   | Missing security headers                                | 🆕       | HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy — none specified              |
+| R   | Chromium export sidecar runs as root                    | 🆕       | Default Docker image runs Chromium as root; needs non-root user + network egress policy                          |
+| S   | Missing global API request timeout                      | 🆕       | Long-running requests exhaust the DB connection pool with no timeout backstop                                    |
+| T   | Missing Yjs document size limit                         | 🆕       | No max Y.Doc size; a board with millions of elements exhausts server memory                                      |
+| U   | Missing job dead-letter queue                           | 🆕       | After `max_attempts`, failed jobs sit silently; no alerting or operator visibility                               |
+| V   | Missing yjs_snapshots retention logic                   | 🆕       | "Keep N most recent via trigger or post-compaction cleanup" — implementation never given                         |
+| W   | Rate limiting by user ID for authed routes              | 🆕       | IP-only rate limiting is evaded via IP rotation; authenticated routes must also rate-limit by user ID            |
+| X   | Missing Yjs time-based compaction                       | 🆕       | Boards that always have ≥1 client connected never compact; need a time-based trigger                             |
+| Y   | Refresh token rotation on every use                     | ⚠️       | v3 only rotates on reuse detection; rotation must happen on every valid refresh                                  |
+| Z   | Missing circuit breaker for S3/email                    | 🆕       | No resilience pattern for external service failure cascading into the job queue                                  |
 
 ---
 
@@ -47,11 +47,11 @@
 **This is a silent data integrity bug introduced by the interaction between v3 §3b and §12h.**
 
 PgBouncer in `transaction` pool mode assigns a different backend connection for each transaction.
-`pg_advisory_lock` (session-level) is tied to the lifetime of a PostgreSQL *session*, not a
+`pg_advisory_lock` (session-level) is tied to the lifetime of a PostgreSQL _session_, not a
 transaction. When called through PgBouncer, the session disappears at transaction end, so:
 
 - The retry loop in §12h calls `pg_try_advisory_lock` on what appear to be successive attempts —
-  but each attempt runs on a *different backend session*. The lock acquired on attempt 1 is held
+  but each attempt runs on a _different backend session_. The lock acquired on attempt 1 is held
   on backend session 42; attempt 2 runs on backend session 71, which sees no existing lock and
   acquires it, giving two concurrent migrators.
 - The `pg_advisory_unlock` in the `finally` block also runs on an arbitrary session and may
@@ -63,7 +63,7 @@ transaction. When called through PgBouncer, the session disappears at transactio
 ```ts
 // migrate.ts — use a direct Postgres connection, never the pooled URL
 const migrationDb = drizzle(
-  new Pool({ connectionString: process.env.POSTGRES_DIRECT_URL }) // db:5432, not pgbouncer:6432
+  new Pool({ connectionString: process.env.POSTGRES_DIRECT_URL }), // db:5432, not pgbouncer:6432
 );
 ```
 
@@ -71,15 +71,15 @@ Add `POSTGRES_DIRECT_URL=postgres://user:pass@db:5432/meko` alongside `DATABASE_
 points at PgBouncer). The migrator uses `POSTGRES_DIRECT_URL`; the application uses `DATABASE_URL`.
 
 **Same rule applies to any code using `pg_advisory_lock` (session-level).** The compaction code
-in §5c correctly uses `pg_try_advisory_xact_lock` (transaction-scoped), which *does* work with
+in §5c correctly uses `pg_try_advisory_xact_lock` (transaction-scoped), which _does_ work with
 PgBouncer transaction mode because the lock is automatically released at transaction end, matching
 PgBouncer's connection lifecycle exactly. No change needed there.
 
-| Lock type | Works with PgBouncer transaction mode? |
-|---|---|
-| `pg_try_advisory_xact_lock` (transaction-scoped) | ✅ Yes — released at COMMIT/ROLLBACK |
-| `pg_advisory_lock` (session-scoped) | 🔴 No — session ends after each transaction |
-| `LISTEN/NOTIFY` | 🔴 No — must use a dedicated direct connection |
+| Lock type                                        | Works with PgBouncer transaction mode?         |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `pg_try_advisory_xact_lock` (transaction-scoped) | ✅ Yes — released at COMMIT/ROLLBACK           |
+| `pg_advisory_lock` (session-scoped)              | 🔴 No — session ends after each transaction    |
+| `LISTEN/NOTIFY`                                  | 🔴 No — must use a dedicated direct connection |
 
 ### 3e. 🔴 Multi-node Yjs room synchronisation
 
@@ -110,11 +110,18 @@ Implementation using Bun's Redis client:
 const pub = new Redis(process.env.REDIS_URL);
 const sub = new Redis(process.env.REDIS_URL);
 
-export async function broadcastUpdate(boardId: string, update: Uint8Array, sourceNodeId: string) {
-  await pub.publish(`room:${boardId}`, JSON.stringify({
-    nodeId: sourceNodeId,
-    update: Buffer.from(update).toString("base64"),
-  }));
+export async function broadcastUpdate(
+  boardId: string,
+  update: Uint8Array,
+  sourceNodeId: string,
+) {
+  await pub.publish(
+    `room:${boardId}`,
+    JSON.stringify({
+      nodeId: sourceNodeId,
+      update: Buffer.from(update).toString("base64"),
+    }),
+  );
 }
 
 sub.subscribe("room:*"); // pattern subscribe
@@ -131,8 +138,8 @@ sub.on("pmessage", (_pattern, channel, raw) => {
 
 **Startup state sync:** when Node 2 receives its first client for a board already active on
 Node 1, Node 2 must initialise its `Y.Doc` from the database (latest snapshot + subsequent
-`yjs_updates` rows) — **not** from Redis, which is ephemeral. Redis is the *incremental update
-bus*, not the source of truth. This is already implied by §5c but must be explicit.
+`yjs_updates` rows) — **not** from Redis, which is ephemeral. Redis is the _incremental update
+bus_, not the source of truth. This is already implied by §5c but must be explicit.
 
 **Consequence for the job queue:** with Redis now a hard dependency for multi-node operation,
 revisit the Phase 1 decision to use Postgres-only. Add Redis to Phase 1; the pub/sub bus and
@@ -185,7 +192,12 @@ export const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
   base: { service: "meko-api", version: process.env.APP_VERSION },
   // Redact sensitive fields before they reach the log sink
-  redact: ["req.headers.authorization", "req.headers.cookie", "body.password", "body.token"],
+  redact: [
+    "req.headers.authorization",
+    "req.headers.cookie",
+    "body.password",
+    "body.token",
+  ],
 });
 
 // Every request context must carry: requestId, userId, workspaceId, boardId
@@ -194,17 +206,18 @@ export const log = pino({
 
 Every log line must include:
 
-| Field | Example |
-|---|---|
-| `requestId` | `"req_01j..."` (nanoid, propagated as `X-Request-ID` header) |
-| `userId` | UUID or `null` for anonymous |
-| `workspaceId` | UUID or `null` |
-| `boardId` | UUID or `null` |
-| `action` | `"ws.update"`, `"job.claimed"`, `"auth.refresh"` |
-| `durationMs` | numeric |
-| `status` | HTTP status or `"ok"` / `"error"` |
+| Field         | Example                                                      |
+| ------------- | ------------------------------------------------------------ |
+| `requestId`   | `"req_01j..."` (nanoid, propagated as `X-Request-ID` header) |
+| `userId`      | UUID or `null` for anonymous                                 |
+| `workspaceId` | UUID or `null`                                               |
+| `boardId`     | UUID or `null`                                               |
+| `action`      | `"ws.update"`, `"job.claimed"`, `"auth.refresh"`             |
+| `durationMs`  | numeric                                                      |
+| `status`      | HTTP status or `"ok"` / `"error"`                            |
 
 **Security events that must always be logged at `warn` or above:**
+
 - Rate limit hit
 - CSRF rejection
 - JWT validation failure (with reason: expired/invalid/wrong-issuer)
@@ -227,13 +240,16 @@ A `javascript:alert(1)` stored as an element URL and clicked by another user is 
 **Validate all URL fields with an allowlist of safe schemes:**
 
 ```ts
-const SafeUrl = z.string().url().refine(
-  (u) => {
-    const scheme = new URL(u).protocol;
-    return ["http:", "https:"].includes(scheme);
-  },
-  { message: "Only http and https URLs are allowed" }
-);
+const SafeUrl = z
+  .string()
+  .url()
+  .refine(
+    (u) => {
+      const scheme = new URL(u).protocol;
+      return ["http:", "https:"].includes(scheme);
+    },
+    { message: "Only http and https URLs are allowed" },
+  );
 
 // Apply to: link.url, embed.src, file.downloadUrl, unfurl.url
 ```
@@ -256,8 +272,13 @@ const MAX_YJS_DOC_BYTES = 50 * 1024 * 1024; // 50 MB per board
 // After applying the update to a scratch doc copy (to get the projected size):
 const projectedSize = Y.encodeStateAsUpdate(scratchDoc).byteLength;
 if (projectedSize > MAX_YJS_DOC_BYTES) {
-  ws.send(JSON.stringify({ type: "error", code: "doc_too_large",
-    message: "Board size limit reached" }));
+  ws.send(
+    JSON.stringify({
+      type: "error",
+      code: "doc_too_large",
+      message: "Board size limit reached",
+    }),
+  );
   return; // do not apply
 }
 ```
@@ -407,7 +428,7 @@ response header on that iframe's origin — isolated from the main app origin.
 
 ## 7. Links & unfurling (v4 additions)
 
-*(No changes to §7a–7d, all correct. One addition:)*
+_(No changes to §7a–7d, all correct. One addition:)_
 
 ### 7e. 🆕 Unfurl re-validation on render
 
@@ -439,6 +460,7 @@ The Chromium export sidecar is a high-risk component: it renders arbitrary board
 **Required mitigations:**
 
 1. **Run Chromium as a non-root user:**
+
 ```dockerfile
 # export-sidecar/Dockerfile
 RUN groupadd -r chromium && useradd -r -g chromium -G audio,video chromium \
@@ -447,11 +469,12 @@ USER chromium
 ```
 
 2. **Restrict Chromium's outbound network to the internal API only:**
+
 ```yaml
 # docker-compose.yml
 export-sidecar:
   networks:
-    - export-internal   # can reach meko-api only
+    - export-internal # can reach meko-api only
   # NOT on the db or redis network
 ```
 
@@ -461,6 +484,7 @@ export-sidecar:
    directly. All data passes through the API's permission check.
 
 4. **Set Chromium's `--host-rules` flag to block all non-API hosts:**
+
 ```ts
 const browser = await puppeteer.launch({
   args: [
@@ -478,23 +502,29 @@ const browser = await puppeteer.launch({
 
 ### 9g. 🔴 Client-side token storage
 
-v3 specifies the refresh token *server-side* schema but says nothing about where tokens live
+v3 specifies the refresh token _server-side_ schema but says nothing about where tokens live
 on the client. This is the most common source of token theft.
 
 **Required:**
 
-| Token | Client storage | Rationale |
-|---|---|---|
+| Token                                  | Client storage                                  | Rationale                                                             |
+| -------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
 | Access token (short-lived JWT, 15 min) | JavaScript memory only (module-scoped variable) | Never in `localStorage` or `sessionStorage` — both are XSS-accessible |
-| Refresh token (long-lived, opaque) | `HttpOnly; Secure; SameSite=Strict` cookie | Inaccessible to JavaScript; survives page reload |
+| Refresh token (long-lived, opaque)     | `HttpOnly; Secure; SameSite=Strict` cookie      | Inaccessible to JavaScript; survives page reload                      |
 
 ```ts
 // auth/tokens.ts — access token lives in module scope only
 let _accessToken: string | null = null;
 
-export function setAccessToken(token: string) { _accessToken = token; }
-export function getAccessToken() { return _accessToken; }
-export function clearAccessToken() { _accessToken = null; }
+export function setAccessToken(token: string) {
+  _accessToken = token;
+}
+export function getAccessToken() {
+  return _accessToken;
+}
+export function clearAccessToken() {
+  _accessToken = null;
+}
 
 // On page load: call POST /api/auth/refresh automatically
 // (the HttpOnly cookie is sent automatically by the browser)
@@ -503,6 +533,7 @@ export function clearAccessToken() { _accessToken = null; }
 ```
 
 The `POST /api/auth/refresh` endpoint must:
+
 - Read the refresh token from the `HttpOnly` cookie (never from the request body or a header).
 - Issue a new access token in the response body.
 - Issue a new refresh token by **rotating** the cookie (new `Set-Cookie`).
@@ -531,14 +562,16 @@ async function handleRefresh(rawToken: string, db: Db) {
 
   if (record.usedAt) {
     // Reuse detected: invalidate entire family
-    await db.update(refreshTokens)
+    await db
+      .update(refreshTokens)
       .set({ revokedAt: new Date() })
       .where(eq(refreshTokens.familyId, record.familyId));
     throw new AuthError("TOKEN_REUSE_FAMILY_REVOKED");
   }
 
   // Mark current token as used
-  await db.update(refreshTokens)
+  await db
+    .update(refreshTokens)
     .set({ usedAt: new Date() })
     .where(eq(refreshTokens.id, record.id));
 
@@ -576,7 +609,7 @@ nginx:
   image: nginx:alpine
   volumes:
     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    - ./certs:/etc/nginx/certs:ro   # or certbot/acme.sh volume
+    - ./certs:/etc/nginx/certs:ro # or certbot/acme.sh volume
   ports:
     - "80:80"
     - "443:443"
@@ -665,13 +698,19 @@ export function securityHeaders(res: Response): Response {
   headers.set("X-Frame-Options", "DENY");
 
   // Force HTTPS (only set when serving over TLS)
-  headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  headers.set(
+    "Strict-Transport-Security",
+    "max-age=63072000; includeSubDomains; preload",
+  );
 
   // Limit referrer leakage (prevents board IDs leaking via Referer)
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
 
   // Disable browser features not needed by the app
-  headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+  headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=()",
+  );
 
   // Content Security Policy — see §12k
   headers.set("Content-Security-Policy", buildCsp());
@@ -725,7 +764,7 @@ silently allowed.
 ```ts
 // middleware/cors.ts
 const ALLOWED_ORIGINS = new Set(
-  (process.env.MEKO_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean)
+  (process.env.MEKO_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean),
 );
 
 export function corsMiddleware(req: Request): Headers {
@@ -739,8 +778,14 @@ export function corsMiddleware(req: Request): Headers {
   }
   // Never set Access-Control-Allow-Origin: * when credentials are involved
 
-  headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, Idempotency-Key");
+  headers.set(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+  headers.set(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Request-ID, Idempotency-Key",
+  );
   headers.set("Access-Control-Max-Age", "86400");
 
   return headers;
@@ -772,12 +817,12 @@ per user, 10 invite emails/day per user).
 
 **Specific high-value rate limits to add:**
 
-| Route group | Key | Limit |
-|---|---|---|
-| `POST /api/auth/*` | IP | 10 req/min |
-| `POST /api/exports` | userId | 5 req/hour |
-| `POST /api/uploads` | userId | 50 req/hour |
-| `POST /api/invites` | userId | 20 req/day |
+| Route group                | Key           | Limit        |
+| -------------------------- | ------------- | ------------ |
+| `POST /api/auth/*`         | IP            | 10 req/min   |
+| `POST /api/exports`        | userId        | 5 req/hour   |
+| `POST /api/uploads`        | userId        | 50 req/hour  |
+| `POST /api/invites`        | userId        | 20 req/day   |
 | `GET /api/*/export-render` | internal only | IP allowlist |
 
 ### 12n. 🆕 Job dead-letter queue
@@ -796,17 +841,28 @@ all attempts. Failed jobs accumulate silently; operators have no visibility.
 ```ts
 // Worker, on job failure:
 if (job.attempts >= job.maxAttempts) {
-  await db.update(jobs).set({ status: "dead", error: err.message, updatedAt: new Date() })
+  await db
+    .update(jobs)
+    .set({ status: "dead", error: err.message, updatedAt: new Date() })
     .where(eq(jobs.id, job.id));
   // Alert: emit a metric or write to a `dead_letter_alerts` table
   // that the ops dashboard polls
-  log.error({ jobId: job.id, type: job.type, error: err.message }, "Job dead-lettered");
+  log.error(
+    { jobId: job.id, type: job.type, error: err.message },
+    "Job dead-lettered",
+  );
 } else {
   // exponential backoff requeue
   const backoff = Math.min(30, 2 ** job.attempts) * 1000;
-  await db.update(jobs)
-    .set({ status: "pending", claimedAt: null, claimExpiresAt: null,
-           attempts: job.attempts + 1, updatedAt: new Date() })
+  await db
+    .update(jobs)
+    .set({
+      status: "pending",
+      claimedAt: null,
+      claimExpiresAt: null,
+      attempts: job.attempts + 1,
+      updatedAt: new Date(),
+    })
     .where(eq(jobs.id, job.id));
   await sleep(backoff);
 }
@@ -881,6 +937,7 @@ export function withTimeout<T>(fn: () => Promise<T>): Promise<T> {
 ```
 
 Set per-route timeouts where appropriate:
+
 - Standard API routes: 10 s
 - Export job start: 30 s
 - Media upload pre-sign: 5 s
@@ -922,6 +979,7 @@ ALTER TABLE refresh_tokens SET (
 ```
 
 Monitor with:
+
 ```sql
 SELECT relname, n_dead_tup, n_live_tup,
        round(n_dead_tup::numeric / NULLIF(n_live_tup,0) * 100, 1) AS dead_pct,
@@ -1017,7 +1075,7 @@ and Postgres:
 it("updates converge across two nodes", async () => {
   const [node1, node2] = await startTestNodes(2);
   const client1 = await connectToBoard(node1, boardId);
-  const client2 = await connectToBoard(node2, boardId);  // different node
+  const client2 = await connectToBoard(node2, boardId); // different node
 
   await client1.sendUpdate({ type: "note", text: "hello" });
   await waitForPropagation(); // wait for Redis pub/sub delivery
@@ -1028,6 +1086,7 @@ it("updates converge across two nodes", async () => {
 ```
 
 Also test:
+
 - Client on Node 1 disconnects → reconnects to Node 2 → converges to same state.
 - Node 1 restarts mid-edit → clients reconnect to Node 2 → no data loss.
 

@@ -1,4 +1,4 @@
-# Meko deployment topology. App + worker connect through PgBouncer (DATABASE_URL); the migrator
+# meko. deployment topology. App + worker connect through PgBouncer (DATABASE_URL); the migrator
 # uses POSTGRES_DIRECT_URL → db:5432, bypassing PgBouncer (§3d). Redis carries the multi-node
 # Yjs bus + WS tickets + rate-limit store (§3e). nginx terminates TLS (§11b). pg-backup runs
 # daily pg_dump (§11c). export-sidecar runs Chromium on an isolated network reaching only the
@@ -37,11 +37,11 @@ services:
       DB_USER: meko
       DB_PASSWORD: meko
       DB_NAME: meko
-      LISTEN_PORT: 6432           # app connects to pgbouncer:6432 (db stays on 5432)
-      POOL_MODE: transaction      # session-level advisory locks must NOT run here (§3d)
+      LISTEN_PORT: 6432 # app connects to pgbouncer:6432 (db stays on 5432)
+      POOL_MODE: transaction # session-level advisory locks must NOT run here (§3d)
       MAX_CLIENT_CONN: "1000"
       DEFAULT_POOL_SIZE: "25"
-      AUTH_TYPE: scram-sha-256    # match postgres 16 default
+      AUTH_TYPE: scram-sha-256 # match postgres 16 default
     networks: [backend]
     depends_on:
       db:
