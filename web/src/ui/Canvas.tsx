@@ -5,10 +5,7 @@ import { requestExport } from "../lib/exports.ts";
 import type { Element, ElementStyle } from "../types.ts";
 import { Badge, Icon, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
-
-const TEXT_COLORS = ["#1f2937", "#6e24ff", "#dc2626", "#2563eb", "#16a34a"];
-const FILL_COLORS = ["#ffffff", "#fff7cc", "#ffd9d9", "#d9ecff", "#d9ffe3"];
-const cycle = (arr: string[], cur: string | undefined) => arr[(arr.indexOf(cur ?? arr[0]!) + 1) % arr.length]!;
+import { NoteSubRail } from "./NoteSubRail.tsx";
 
 export function Canvas({ boardId }: { boardId: string }) {
   const connRef = useRef<BoardConnection | null>(null);
@@ -131,24 +128,12 @@ export function Canvas({ boardId }: { boardId: string }) {
     { key: "export", label: "Export", icon: <Icon.ExportIcon />, onClick: onExport, disabled: busy },
   ];
 
-  const noteTools: Tool[] = selected
-    ? [
-        { key: "back", label: "Done", icon: <Icon.ArrowLeftIcon />, onClick: () => setSelectedId(null) },
-        { key: "bold", label: "Bold", shortcut: "⌘B", icon: <span className="font-black">B</span>, active: selected.style?.fontWeight === "bold", onClick: () => patchStyle(selected.id, { fontWeight: selected.style?.fontWeight === "bold" ? "normal" : "bold" }) },
-        { key: "smaller", label: "Smaller", icon: <span className="text-xs font-bold">A−</span>, onClick: () => patchStyle(selected.id, { fontSize: Math.max(8, (selected.style?.fontSize ?? 14) - 2) }) },
-        { key: "bigger", label: "Bigger", icon: <span className="text-base font-bold">A+</span>, onClick: () => patchStyle(selected.id, { fontSize: Math.min(96, (selected.style?.fontSize ?? 14) + 2) }) },
-        { key: "align", label: "Align", icon: <Icon.AlignIcon />, onClick: () => patchStyle(selected.id, { align: selected.style?.align === "left" || !selected.style?.align ? "center" : selected.style?.align === "center" ? "right" : "left" }) },
-        { key: "color", label: "Text colour", icon: <span style={{ color: selected.style?.color ?? "#1f2937" }} className="font-black">A</span>, onClick: () => patchStyle(selected.id, { color: cycle(TEXT_COLORS, selected.style?.color) }) },
-        { key: "fill", label: "Fill", icon: <Icon.PaintIcon />, onClick: () => patchStyle(selected.id, { fill: cycle(FILL_COLORS, selected.style?.fill) }) },
-      ]
-    : [];
-
-  const isNoteSelected = selected?.type === "note" || selected?.type === "text";
+  const isNoteSelected = selected && (selected.type === "note" || selected.type === "text");
 
   return (
     <div className="flex flex-1 overflow-hidden">
       {isNoteSelected ? (
-        <ToolRail tools={noteTools} bottom={[{ key: "delete", label: "Delete", icon: <Icon.TrashIcon />, onClick: () => selected && remove(selected.id) }]} />
+        <NoteSubRail el={selected} onDone={() => setSelectedId(null)} onPatchStyle={(s) => patchStyle(selected.id, s)} onDelete={() => remove(selected.id)} />
       ) : (
         <ToolRail tools={createTools} />
       )}

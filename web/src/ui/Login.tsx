@@ -28,7 +28,7 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
 
   return (
     <div className="grid h-screen place-items-center bg-slate-100">
-      <form className="flex w-80 flex-col gap-4 rounded-xl bg-white px-8 py-9 shadow-lg" onSubmit={submit}>
+      <form className="flex w-80 flex-col gap-4 rounded-xl border-2 border-slate-100 bg-white px-8 py-9" onSubmit={submit}>
         <div>
           <h1 className="heading text-2xl text-primary">meko.</h1>
           <p className="mt-1 text-slate-400">{mode === "login" ? "Sign in to your boards" : "Create an account"}</p>

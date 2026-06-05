@@ -23,7 +23,7 @@ export function TopBar({
 }) {
   const active = workspaces.find((w) => w.id === activeWs);
   return (
-    <header className="flex h-14 items-center gap-3 border-b border-slate-200 bg-slate-100 px-4">
+    <header className="flex h-14 items-center gap-3 border-b-2 border-slate-100 bg-slate-100 px-4">
       <button onClick={onHome} className="grid h-7 w-7 place-items-center rounded-lg bg-primary font-bold text-white">
         m
       </button>

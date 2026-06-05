@@ -20,7 +20,7 @@ export interface Tool {
 // click), matching Milanote. The active tool's square is filled primary.
 export function ToolRail({ tools, bottom = [] }: { tools: Tool[]; bottom?: Tool[] }) {
   return (
-    <nav className="flex w-20 shrink-0 flex-col items-center gap-1 border-r border-slate-200 bg-white py-3">
+    <nav className="flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
       {tools.map((t) => (
         <ToolButton key={t.key} tool={t} />
       ))}
