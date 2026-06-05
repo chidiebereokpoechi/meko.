@@ -1,0 +1,32 @@
+{
+  "name": "meko",
+  "version": "0.1.0",
+  "description": "Realtime collaborative canvas",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "worker": "bun run src/worker/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/db/migrate.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.4",
+    "elysia": "^1.1.26",
+    "ioredis": "^5.4.2",
+    "nanoid": "^5.0.9",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "yjs": "^13.6.20",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "typescript": "^5.7.2"
+  }
+}

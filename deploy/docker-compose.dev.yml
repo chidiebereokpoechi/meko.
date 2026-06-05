@@ -1,0 +1,15 @@
+# Local-dev overlay: publishes the data services on high host ports so you can run the app and
+# worker on the host (bun run dev / worker) against containerised Postgres/PgBouncer/Redis.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db pgbouncer redis
+# Host ports are deliberately non-standard to avoid clashing with a local Postgres/Redis.
+services:
+  db:
+    ports:
+      - "55432:5432"   # POSTGRES_DIRECT_URL → localhost:55432
+  pgbouncer:
+    ports:
+      - "56432:6432"   # DATABASE_URL → localhost:56432
+  redis:
+    ports:
+      - "56379:6379"   # REDIS_URL → localhost:56379

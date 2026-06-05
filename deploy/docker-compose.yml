@@ -1,0 +1,115 @@
+# Meko deployment topology. App + worker connect through PgBouncer (DATABASE_URL); the migrator
+# uses POSTGRES_DIRECT_URL → db:5432, bypassing PgBouncer (§3d). Redis carries the multi-node
+# Yjs bus + WS tickets + rate-limit store (§3e). nginx terminates TLS (§11b). pg-backup runs
+# daily pg_dump (§11c). export-sidecar is network-isolated (§8b) — added in Phase 7.
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://meko:meko@pgbouncer:6432/meko
+  POSTGRES_DIRECT_URL: postgres://meko:meko@db:5432/meko
+  REDIS_URL: redis://redis:6379
+  MEKO_ALLOWED_ORIGINS: ${MEKO_ALLOWED_ORIGINS:-https://meko.example.com}
+  MEKO_BASE_URL: ${MEKO_BASE_URL:-https://meko.example.com}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: meko
+      POSTGRES_PASSWORD: meko
+      POSTGRES_DB: meko
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meko"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: db
+      DB_USER: meko
+      DB_PASSWORD: meko
+      DB_NAME: meko
+      LISTEN_PORT: 6432           # app connects to pgbouncer:6432 (db stays on 5432)
+      POOL_MODE: transaction      # session-level advisory locks must NOT run here (§3d)
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "25"
+      AUTH_TYPE: scram-sha-256    # match postgres 16 default
+    depends_on:
+      db:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    # Pub/sub + ephemeral WS tickets + rate-limit counters — persistence unnecessary (§16).
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  migrate:
+    build: { context: .., dockerfile: Dockerfile }
+    command: ["bun", "run", "src/db/migrate.ts"]
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: { context: .., dockerfile: Dockerfile }
+    environment:
+      <<: *app-env
+      NODE_ID: app-1
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  worker:
+    build: { context: .., dockerfile: Dockerfile }
+    command: ["bun", "run", "src/worker/index.ts"]
+    environment:
+      <<: *app-env
+      NODE_ID: worker-1
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on: [app]
+
+  pg-backup:
+    image: postgres:16-alpine
+    entrypoint: >
+      sh -c "while true; do
+        PGPASSWORD=meko pg_dump -h db -U meko meko
+          | gzip > /backups/meko_$$(date +%Y%m%d_%H%M%S).sql.gz
+        && find /backups -name '*.sql.gz' -mtime +7 -delete;
+        sleep 86400;
+      done"
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

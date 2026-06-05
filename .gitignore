@@ -1,0 +1,24 @@
+# deps
+node_modules/
+bun.lockb.bak
+
+# build
+dist/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+secrets/
+certs/
+backups/
+
+# logs
+*.log
+
+# os
+.DS_Store
+
+# drizzle
+drizzle/meta/_journal.bak
