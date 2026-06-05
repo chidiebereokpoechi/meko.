@@ -146,7 +146,7 @@ export function Canvas({ boardId }: { boardId: string }) {
   return (
     <div className="flex flex-1 overflow-hidden">
       {isNoteSelected ? (
-        <NoteSubRail el={selected} onDone={deselect} onExec={exec} onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)} onDelete={() => remove(selected.id)} />
+        <NoteSubRail el={selected} editing={editingId === selected.id} onDone={deselect} onExec={exec} onFill={(hex) => patch(selected.id, { style: { ...selected.style, fill: hex } } as Partial<Element>)} onDelete={() => remove(selected.id)} />
       ) : (
         <ToolRail tools={createTools} />
       )}

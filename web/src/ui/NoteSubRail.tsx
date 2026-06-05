@@ -10,12 +10,14 @@ const TEXTS = ["#1f2937", "#6e24ff", "#dc2626", "#2563eb", "#16a34a", "#8a6d52",
 // no second toolbar. `exec` runs an execCommand on the active editor.
 export function NoteSubRail({
   el,
+  editing,
   onDone,
   onExec,
   onFill,
   onDelete,
 }: {
   el: Element;
+  editing: boolean;
   onDone: () => void;
   onExec: (command: string, value?: string) => void;
   onFill: (hex: string) => void;
@@ -43,21 +45,27 @@ export function NoteSubRail({
     <nav className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
       <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
       <div ref={colorRef} className="w-full">
-        <RailBtn label="Text style" active={colorOpen} icon={<span className="h-4 w-4 rounded border border-slate-300" style={{ background: el.style?.fill ?? "#ffffff" }} />} onClick={() => setColorOpen((o) => !o)} />
+        <RailBtn label="Color" active={colorOpen} icon={<span className="h-4 w-4 rounded border border-slate-300" style={{ background: el.style?.fill ?? "#ffffff" }} />} onClick={() => setColorOpen((o) => !o)} />
       </div>
-      <RailBtn label="Bold" shortcut="⌘B" active={on("bold")} icon={<span className="font-black">B</span>} onClick={() => onExec("bold")} />
-      <RailBtn label="Italic" shortcut="⌘I" active={on("italic")} icon={<span className="font-serif italic">I</span>} onClick={() => onExec("italic")} />
-      <RailBtn label="Strikethrough" active={on("strikeThrough")} icon={<span className="font-bold line-through">S</span>} onClick={() => onExec("strikeThrough")} />
-      <RailBtn label="Underline" shortcut="⌘U" active={on("underline")} icon={<span className="font-bold underline">U</span>} onClick={() => onExec("underline")} />
-      <RailBtn label="Bulleted list" active={on("insertUnorderedList")} icon={<Icon.BulletListIcon />} onClick={() => onExec("insertUnorderedList")} />
-      <RailBtn label="Numbered list" active={on("insertOrderedList")} icon={<Icon.NumberListIcon />} onClick={() => onExec("insertOrderedList")} />
-      <RailBtn label="Align" icon={<Icon.AlignIcon />} onClick={() => onExec(on("justifyCenter") ? "justifyRight" : on("justifyRight") ? "justifyLeft" : "justifyCenter")} />
+
+      {/* Text formatting only applies while the caret is in the note (edit mode). */}
+      {editing && (
+        <>
+          <RailBtn label="Bold" shortcut="⌘B" active={on("bold")} icon={<span className="font-black">B</span>} onClick={() => onExec("bold")} />
+          <RailBtn label="Italic" shortcut="⌘I" active={on("italic")} icon={<span className="font-serif italic">I</span>} onClick={() => onExec("italic")} />
+          <RailBtn label="Strikethrough" active={on("strikeThrough")} icon={<span className="font-bold line-through">S</span>} onClick={() => onExec("strikeThrough")} />
+          <RailBtn label="Underline" shortcut="⌘U" active={on("underline")} icon={<span className="font-bold underline">U</span>} onClick={() => onExec("underline")} />
+          <RailBtn label="Bulleted list" active={on("insertUnorderedList")} icon={<Icon.BulletListIcon />} onClick={() => onExec("insertUnorderedList")} />
+          <RailBtn label="Numbered list" active={on("insertOrderedList")} icon={<Icon.NumberListIcon />} onClick={() => onExec("insertOrderedList")} />
+          <RailBtn label="Align" icon={<Icon.AlignIcon />} onClick={() => onExec(on("justifyCenter") ? "justifyRight" : on("justifyRight") ? "justifyLeft" : "justifyCenter")} />
+        </>
+      )}
 
       <span className="flex-1" />
       <RailBtn label="Delete" icon={<Icon.TrashIcon />} onClick={onDelete} />
 
       {colorOpen && (
-        <ColorPopover top={colorRef.current?.offsetTop ?? 0} fill={el.style?.fill} onFill={onFill} onColor={(c) => onExec("foreColor", c)} />
+        <ColorPopover top={colorRef.current?.offsetTop ?? 0} fill={el.style?.fill} showText={editing} onFill={onFill} onColor={(c) => onExec("foreColor", c)} />
       )}
     </nav>
   );
@@ -77,15 +85,18 @@ const RailBtn = ({ label, shortcut, icon, active, onClick }: { label: string; sh
   </Tooltip>
 );
 
-function ColorPopover({ top, fill, onFill, onColor }: { top: number; fill?: string; onFill: (c: string) => void; onColor: (c: string) => void }) {
+function ColorPopover({ top, fill, showText, onFill, onColor }: { top: number; fill?: string; showText: boolean; onFill: (c: string) => void; onColor: (c: string) => void }) {
   const [tab, setTab] = useState<"bg" | "text">("bg");
+  const active = showText ? tab : "bg";
   return (
     <div className="absolute left-full z-50 ml-2 w-64 rounded-2xl border-2 border-slate-100 bg-white p-4 shadow-xl" style={{ top }} onMouseDown={(e) => e.preventDefault()}>
-      <div className="mb-3 flex gap-2">
-        <TabBtn active={tab === "bg"} onClick={() => setTab("bg")}>Background</TabBtn>
-        <TabBtn active={tab === "text"} onClick={() => setTab("text")}>Text</TabBtn>
-      </div>
-      {tab === "bg" ? (
+      {showText && (
+        <div className="mb-3 flex gap-2">
+          <TabBtn active={active === "bg"} onClick={() => setTab("bg")}>Background</TabBtn>
+          <TabBtn active={active === "text"} onClick={() => setTab("text")}>Text</TabBtn>
+        </div>
+      )}
+      {active === "bg" ? (
         <Grid colors={FILLS} selected={fill ?? "#ffffff"} onPick={onFill} />
       ) : (
         <Grid colors={TEXTS} onPick={onColor} letter />
