@@ -28,6 +28,8 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
+  // Argon2id hash; nullable so future OAuth-only accounts can exist without a password.
+  passwordHash: text("password_hash"),
   createdAt: now(),
 }, (t) => [uniqueIndex("users_email_idx").on(t.email)]);
 

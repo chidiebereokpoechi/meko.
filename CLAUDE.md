@@ -126,7 +126,12 @@ Building per v4 §15.
   (`src/lib/pagination.ts` §13c), REST CRUD for workspaces/boards/comments, and the WS
   board-access check (viewers join read-only; edit-gated updates).
 
-Later phases (auth hardening, media, links, sharing, exports, polish) are tracked in the plan
-and not yet built. When you implement a phase item, check it against the invariant it maps to
-above. Note: signup/login is **Phase 3** — there is no credential flow yet; access tokens are
-minted directly in tests via `mintAccessToken`.
+- **Phase 3 (auth hardening) — done.** Signup/login with argon2id passwords
+  (`src/auth/password.ts`), session bootstrap (access token in body + rotating refresh cookie),
+  Redis sliding-window rate limiter (`src/lib/rate-limit.ts` §12m) — `/api/auth/*` capped at
+  10/min per IP. Refresh rotation-on-every-use + family revocation already in place (§9h). CSP
+  is enforced (not report-only).
+
+Later phases (media, links, sharing, exports, polish) are tracked in the plan and not yet built.
+When you implement a phase item, check it against the invariant it maps to above. Authenticated
+API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.

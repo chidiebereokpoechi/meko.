@@ -9,11 +9,12 @@ import { securityHeaders } from "@/http/middleware/security-headers.ts";
 import { requestContext } from "@/http/middleware/request-context.ts";
 import { timeoutResponse } from "@/http/middleware/timeout.ts";
 import { health } from "@/http/routes/health.ts";
-import { auth } from "@/http/routes/auth.ts";
+import { auth, wsTicket } from "@/http/routes/auth.ts";
 import { workspaceRoutes } from "@/http/routes/workspaces.ts";
 import { boardRoutes } from "@/http/routes/boards.ts";
 import { redeemWsTicket } from "@/auth/ws-ticket.ts";
 import { boardAccess, ForbiddenError } from "@/lib/permissions.ts";
+import { RateLimitError } from "@/lib/rate-limit.ts";
 import { securityEvent } from "@/lib/logger.ts";
 import { roomManager, type LocalClient } from "@/realtime/room.ts";
 
@@ -44,6 +45,11 @@ const app = new Elysia()
       set.status = 403;
       return { error: "FORBIDDEN" };
     }
+    if (error instanceof RateLimitError) {
+      set.status = 429;
+      set.headers["retry-after"] = String(error.retryAfterSec);
+      return { error: "RATE_LIMITED" };
+    }
     // Let Elysia's built-in error classes keep their status (422 validation, 404, parse errors).
     if (code === "VALIDATION") {
       set.status = 422;
@@ -62,6 +68,7 @@ const app = new Elysia()
   .use(requestContext)
   .use(health)
   .use(auth)
+  .use(wsTicket)
   .use(workspaceRoutes)
   .use(boardRoutes)
   // WebSocket board endpoint. Origin is validated at the upgrade; auth is by ticket message.
