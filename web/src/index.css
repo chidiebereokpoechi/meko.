@@ -97,3 +97,10 @@ body {
   text-decoration: underline;
   cursor: pointer;
 }
+/* The canvas is select-none so drags don't highlight text; editable fields opt back in. */
+.note-editable,
+[contenteditable="true"],
+input,
+textarea {
+  user-select: text;
+}

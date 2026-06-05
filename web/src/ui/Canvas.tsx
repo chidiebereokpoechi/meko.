@@ -98,6 +98,7 @@ export function Canvas({
   // In-progress arrow drag from an element's connect ball; linkEnd is the live pointer (world).
   const [linking, setLinking] = useState<{ from: string } | null>(null);
   const [linkEnd, setLinkEnd] = useState<{ x: number; y: number } | null>(null);
+  const [linkTarget, setLinkTarget] = useState<string | null>(null); // hovered valid drop element
   const [selectedConn, setSelectedConn] = useState<string | null>(null);
   // Inline label editing + live endpoint reassignment for the selected connection.
   const [editingConnLabel, setEditingConnLabel] = useState<string | null>(null);
@@ -391,21 +392,32 @@ export function Canvas({
 
   // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
   // to whatever element sits under the cursor.
+  // A valid drop target: topmost element under the point that isn't the source and isn't already
+  // connected from the source in that direction.
+  const linkTargetAt = (w: { x: number; y: number }, from: string): string | null => {
+    const el = [...sizedElements].reverse().find((e) => e.id !== from && w.x >= e.x && w.x <= e.x + e.w && w.y >= e.y && w.y <= e.y + e.h);
+    if (!el) return null;
+    const dup = Array.from(connRef.current?.connections.values() ?? []).some((cn) => cn.from === from && cn.to === el.id);
+    return dup ? null : el.id;
+  };
   const startLink = (from: string, e: React.PointerEvent) => {
     if (readOnly) return;
     e.stopPropagation();
     setLinking({ from });
     setLinkEnd(toWorld(e.clientX, e.clientY));
-    const move = (ev: PointerEvent) => setLinkEnd(toWorld(ev.clientX, ev.clientY));
+    const move = (ev: PointerEvent) => {
+      const w = toWorld(ev.clientX, ev.clientY);
+      setLinkEnd(w);
+      setLinkTarget(linkTargetAt(w, from));
+    };
     const up = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const w = toWorld(ev.clientX, ev.clientY);
-      // Topmost element under the pointer (later in array = drawn on top).
-      const target = [...sizedElements].reverse().find((el) => el.id !== from && w.x >= el.x && w.x <= el.x + el.w && w.y >= el.y && w.y <= el.y + el.h);
-      if (target) addConnection(from, target.id);
+      const target = linkTargetAt(toWorld(ev.clientX, ev.clientY), from);
+      if (target) addConnection(from, target);
       setLinking(null);
       setLinkEnd(null);
+      setLinkTarget(null);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1042,7 +1054,7 @@ export function Canvas({
   };
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-1 select-none overflow-hidden">
       {readOnly ? (
         <nav className="flex w-20 shrink-0 flex-col items-center gap-2 border-r-2 border-slate-100 bg-white py-3 text-center">
           <Icon.EyeIcon className="text-xl text-slate-400" />
@@ -1265,7 +1277,7 @@ export function Canvas({
             {/* Lines render behind elements; handles + labels render above (after the cards). */}
             <ConnectionLines
               lines={connLines}
-              temp={linking && linkEnd ? { from: elements.find((e) => e.id === linking.from) ?? null, end: linkEnd } : null}
+              temp={linking && linkEnd ? { from: sizedElements.find((e) => e.id === linking.from) ?? null, end: linkEnd, target: linkTarget ? sizedElements.find((e) => e.id === linkTarget) ?? null : null } : null}
               readOnly={readOnly}
               selectedId={selectedConn}
               onSelect={(id) => {
@@ -1327,6 +1339,16 @@ export function Canvas({
                 onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
               />
             ))}
+            {/* Highlight the element a connection drag would land on. */}
+            {linkTarget && (() => {
+              const t = sizedElements.find((e) => e.id === linkTarget);
+              return t ? (
+                <div
+                  className="pointer-events-none absolute z-[6] rounded-lg border-2 border-primary bg-primary/5"
+                  style={{ left: t.x - 3, top: t.y - 3, width: t.w + 6, height: t.h + 6 }}
+                />
+              ) : null;
+            })()}
             <ConnectionOverlay
               lines={connLines}
               zoom={view.zoom}
@@ -1640,12 +1662,15 @@ function ConnectionLines({
   onSelect,
 }: {
   lines: ConnLine[];
-  temp: { from: Element | null; end: Pt } | null;
+  temp: { from: Element | null; end: Pt; target: Element | null } | null;
   readOnly?: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const tempP1 = temp?.from ? edgePoint(temp.from, temp.end.x, temp.end.y) : null;
+  // Preview starts at the source CENTRE; if hovering a valid target it clings to that element's
+  // edge (toward the source), otherwise it follows the cursor.
+  const tempStart = temp?.from ? { x: temp.from.x + temp.from.w / 2, y: temp.from.y + temp.from.h / 2 } : null;
+  const tempEnd = temp ? (temp.target && tempStart ? edgePoint(temp.target, tempStart.x, tempStart.y) : temp.end) : null;
   return (
     <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
       <defs>
@@ -1676,8 +1701,8 @@ function ConnectionLines({
           </g>
         );
       })}
-      {tempP1 && temp && (
-        <path d={connPath(tempP1, temp.end, null)} fill="none" stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#conn-arrow)" />
+      {tempStart && tempEnd && (
+        <path d={connPath(tempStart, tempEnd, null)} fill="none" stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#conn-arrow)" />
       )}
     </svg>
   );
