@@ -22,6 +22,13 @@
       "when": 1780640262122,
       "tag": "0002_flashy_wallflower",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780640778422,
+      "tag": "0003_light_kid_colt",
+      "breakpoints": true
     }
   ]
 }

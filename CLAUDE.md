@@ -141,6 +141,14 @@ Building per v4 §15.
   emits display + thumbnail derivatives. `media` row tracks status; element `src` resolves to the
   display derivative; the raw original is edit-gated (a read-only guest can't fetch a scriptable SVG).
 
-Later phases (links, sharing, exports, polish) are tracked in the plan and not yet built.
+- **Phase 5 (links & unfurling) — done.** SSRF guard (`src/lib/ssrf.ts`): `isPrivateIp` covers
+  IPv4/IPv6 private/reserved/loopback/link-local (incl. `169.254.169.254` metadata) + v4-mapped
+  IPv6; `ssrfSafeUrl` resolves DNS and rejects if *any* address is non-public. Unfurl
+  (`src/links/unfurl.ts`): manual redirect following with a per-hop SSRF re-check, 5s timeout,
+  512KB body cap, pure `parseOpenGraph`. Route validates `SafeUrl` at the write path, edit-gated,
+  60/hr/user, 24h cache in `unfurls` (stores `resolvedIp` so reads never re-resolve, §7e).
+  `SsrfError` → 422.
+
+Later phases (sharing/permissions extras, exports, polish) are tracked in the plan and not yet built.
 When you implement a phase item, check it against the invariant it maps to above. Authenticated
 API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.

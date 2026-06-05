@@ -161,6 +161,20 @@ export const idempotencyKeys = pgTable("idempotency_keys", {
   createdAt: now(),
 }, (t) => [index("idempotency_keys_expires_idx").on(t.expiresAt)]);
 
+// --- Link unfurls (§7) ---
+
+// Cache of unfurl results keyed by URL. resolvedIp is stored at unfurl time so reads never
+// re-resolve DNS (§7e); a manual refresh re-runs ssrfSafeUrl against current DNS. Only http(s)
+// URLs are ever written here (SafeUrl validated at the route).
+export const unfurls = pgTable("unfurls", {
+  url: text("url").primaryKey(),
+  title: text("title"),
+  description: text("description"),
+  imageUrl: text("image_url"),
+  resolvedIp: text("resolved_ip"),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // --- Media (§6) ---
 
 export const mediaStatusEnum = pgEnum("media_status", ["pending", "ready", "failed"]);

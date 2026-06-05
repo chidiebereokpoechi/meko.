@@ -13,6 +13,8 @@ import { auth, wsTicket } from "@/http/routes/auth.ts";
 import { workspaceRoutes } from "@/http/routes/workspaces.ts";
 import { boardRoutes } from "@/http/routes/boards.ts";
 import { mediaRoutes } from "@/http/routes/media.ts";
+import { linkRoutes } from "@/http/routes/links.ts";
+import { SsrfError } from "@/lib/ssrf.ts";
 import { redeemWsTicket } from "@/auth/ws-ticket.ts";
 import { boardAccess, ForbiddenError } from "@/lib/permissions.ts";
 import { RateLimitError } from "@/lib/rate-limit.ts";
@@ -51,6 +53,10 @@ const app = new Elysia()
       set.headers["retry-after"] = String(error.retryAfterSec);
       return { error: "RATE_LIMITED" };
     }
+    if (error instanceof SsrfError) {
+      set.status = 422;
+      return { error: "UNFURL_BLOCKED" };
+    }
     // Let Elysia's built-in error classes keep their status (422 validation, 404, parse errors).
     if (code === "VALIDATION") {
       set.status = 422;
@@ -73,6 +79,7 @@ const app = new Elysia()
   .use(workspaceRoutes)
   .use(boardRoutes)
   .use(mediaRoutes)
+  .use(linkRoutes)
   // WebSocket board endpoint. Origin is validated at the upgrade; auth is by ticket message.
   .ws("/boards/:boardId", {
     // §5g step 1: reject cross-origin upgrades — the only CSRF control browsers enforce on WS.

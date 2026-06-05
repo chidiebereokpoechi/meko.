@@ -72,6 +72,18 @@ test("stranger cannot read a board they have no access to", async () => {
   expect((await fetch(`${BASE}/api/boards/${board.id}`, { headers: H(strangerTok) })).status).toBe(403);
 });
 
+test("unfurl blocks unsafe scheme + SSRF target (§7)", async () => {
+  const ws = await (await fetch(`${BASE}/api/workspaces`, { method: "POST", headers: H(ownerTok), body: JSON.stringify({ name: "L" }) })).json();
+  const board = await (await fetch(`${BASE}/api/workspaces/${ws.id}/boards`, { method: "POST", headers: H(ownerTok), body: JSON.stringify({ title: "l" }) })).json();
+
+  const unsafe = await fetch(`${BASE}/api/boards/${board.id}/unfurl`, { method: "POST", headers: H(ownerTok), body: JSON.stringify({ url: "javascript:alert(1)" }) });
+  expect(unsafe.status).toBe(422);
+
+  const metadata = await fetch(`${BASE}/api/boards/${board.id}/unfurl`, { method: "POST", headers: H(ownerTok), body: JSON.stringify({ url: "http://169.254.169.254/latest/meta-data/" }) });
+  expect(metadata.status).toBe(422);
+  expect((await metadata.json()).error).toBe("UNFURL_BLOCKED");
+});
+
 test("comment create + paginated list", async () => {
   const ws = await (await fetch(`${BASE}/api/workspaces`, { method: "POST", headers: H(ownerTok), body: JSON.stringify({ name: "C" }) })).json();
   const board = await (await fetch(`${BASE}/api/workspaces/${ws.id}/boards`, { method: "POST", headers: H(ownerTok), body: JSON.stringify({ title: "b" }) })).json();
