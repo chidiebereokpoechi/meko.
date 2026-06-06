@@ -2,6 +2,7 @@ export { Button } from "./Button.tsx";
 export { TextField } from "./TextField.tsx";
 export { Modal } from "./Modal.tsx";
 export { Select, type Option } from "./Select.tsx";
+export { ContextMenu, type MenuItem } from "./ContextMenu.tsx";
 export { Badge } from "./Badge.tsx";
 export { Tooltip } from "./Tooltip.tsx";
 export { ColorPicker } from "./ColorPicker.tsx";

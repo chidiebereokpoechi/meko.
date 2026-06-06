@@ -13,21 +13,33 @@ export const setAccessToken = (t: string | null) => {
 
 // Refresh sends the HttpOnly cookie automatically (credentials: include). Returns true if a new
 // access token was obtained.
-export async function refresh(): Promise<boolean> {
-  try {
-    const res = await fetch(`${API}/api/auth/refresh`, { method: "POST", credentials: "include" });
-    if (!res.ok) {
+//
+// Single-flight: refresh tokens rotate on every use and reuse revokes the whole family (§9h), so
+// concurrent callers (a burst of 401s, multiple tabs' first request) MUST share one request —
+// otherwise the second send a just-rotated token and the server revokes everyone. While a refresh
+// is in flight, every caller awaits the same promise.
+let inFlight: Promise<boolean> | null = null;
+export function refresh(): Promise<boolean> {
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    try {
+      const res = await fetch(`${API}/api/auth/refresh`, { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        accessToken = null;
+        return false;
+      }
+      const { accessToken: tok } = (await res.json()) as { accessToken: string };
+      accessToken = tok;
+      return true;
+    } catch {
+      // Network error / API down — treat as unauthenticated rather than hanging the boot screen.
       accessToken = null;
       return false;
+    } finally {
+      inFlight = null;
     }
-    const { accessToken: tok } = (await res.json()) as { accessToken: string };
-    accessToken = tok;
-    return true;
-  } catch {
-    // Network error / API down — treat as unauthenticated rather than hanging the boot screen.
-    accessToken = null;
-    return false;
-  }
+  })();
+  return inFlight;
 }
 
 export async function login(email: string, password: string): Promise<void> {

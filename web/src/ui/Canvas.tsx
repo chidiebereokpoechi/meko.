@@ -26,7 +26,7 @@ import type {
   LineShape,
   TodoItem,
 } from "../types.ts";
-import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
+import { Badge, Button, ContextMenu, Icon, type MenuItem, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
 import { LinkSubRail } from "./LinkSubRail.tsx";
@@ -86,6 +86,8 @@ export function Canvas({
     id: string;
     kind: "image" | "link" | "embed" | "board";
   } | null>(null);
+  // Internal element clipboard (copy/cut within meko + paste-styles).
+  const clipboardRef = useRef<Element[]>([]);
   const editorRef = useRef<ActiveEditor | null>(null);
   const savedRange = useRef<Range | null>(null);
   const panRef = useRef<{
@@ -190,6 +192,8 @@ export function Canvas({
     cx: number;
     cy: number;
   } | null>(null);
+  // Right-click context menu: screen position + the element ids it acts on.
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -240,7 +244,10 @@ export function Canvas({
   for (const e of elements)
     if (e.type === "column")
       for (const cid of e.children) childToCol.set(cid, e.id);
-  const topElements = elements.filter((e) => !childToCol.has(e.id));
+  // Top-level (not inside a column), painted in stacking order (z, then insertion order).
+  const topElements = elements
+    .filter((e) => !childToCol.has(e.id))
+    .sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
   const connections: Connection[] = connRef.current
     ? Array.from(connRef.current.connections.values())
     : [];
@@ -380,23 +387,29 @@ export function Canvas({
     }
     return set;
   };
-  const remove = (id: string) => {
+  // Delete a set of elements: drop them, prune their connections, and unlink them from any column
+  // that still references them (so deleting a card inside a column actually removes it).
+  const deleteSet = (all: Set<string>) => {
     const c = connRef.current;
-    const all = withColumnChildren([id]);
-    c?.doc.transact(() => {
+    if (!c) return;
+    c.doc.transact(() => {
+      for (const e of c.elements.values()) {
+        if (e.type === "column" && e.children.some((cid) => all.has(cid))) {
+          c.elements.set(e.id, { ...e, children: e.children.filter((cid) => !all.has(cid)) });
+        }
+      }
       all.forEach((x) => c.elements.delete(x));
       pruneConnections(all);
     });
+  };
+  const remove = (id: string) => {
+    const all = withColumnChildren([id]);
+    deleteSet(all);
     setSelectedIds((ids) => ids.filter((x) => !all.has(x)));
     setEditingId((s) => (s && all.has(s) ? null : s));
   };
   const removeMany = (ids: string[]) => {
-    const c = connRef.current;
-    const all = withColumnChildren(ids);
-    c?.doc.transact(() => {
-      all.forEach((id) => c.elements.delete(id));
-      pruneConnections(all);
-    });
+    deleteSet(withColumnChildren(ids));
     setSelectedIds([]);
     setEditingId(null);
   };
@@ -485,14 +498,15 @@ export function Canvas({
       if (readOnly) return;
       if (e.key !== "Backspace" && e.key !== "Delete") return;
       if (editingId) return;
-      const ae = document.activeElement as HTMLElement | null;
-      if (
+      // Only bail when an actually-editable field is focused — a selected card's read-only inputs
+      // (e.g. a to-do's items) must not block deletion.
+      const ae = document.activeElement as HTMLInputElement | null;
+      const editable =
         ae &&
-        (ae.tagName === "INPUT" ||
-          ae.tagName === "TEXTAREA" ||
-          ae.isContentEditable)
-      )
-        return;
+        ((ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")
+          ? !ae.readOnly && !ae.disabled
+          : ae.isContentEditable);
+      if (editable) return;
       if (selectedIds.length) {
         e.preventDefault();
         removeMany(selectedIds);
@@ -590,6 +604,7 @@ export function Canvas({
       .find(
         (e) =>
           e.id !== from &&
+          !childToCol.has(e.id) &&
           w.x >= e.x &&
           w.x <= e.x + e.w &&
           w.y >= e.y &&
@@ -690,6 +705,7 @@ export function Canvas({
         .reverse()
         .find(
           (el) =>
+            !childToCol.has(el.id) &&
             w.x >= el.x &&
             w.x <= el.x + el.w &&
             w.y >= el.y &&
@@ -738,7 +754,7 @@ export function Canvas({
   // Snap a pointer position to the nearest element anchor (corner / edge-mid / centre), else free.
   const snapEndpoint = (clientX: number, clientY: number): LineEndpoint => {
     const w = toWorld(clientX, clientY);
-    const hit = nearestAnchor(w, sizedElements, 12 / view.zoom);
+    const hit = nearestAnchor(w, sizedElements.filter((e) => !childToCol.has(e.id)), 12 / view.zoom);
     return hit
       ? {
           x: hit.pt.x,
@@ -1102,6 +1118,12 @@ export function Canvas({
       const next = col.children.filter((id) => id !== childId);
       next.splice(Math.max(0, Math.min(index, next.length)), 0, childId);
       c.elements.set(colId, { ...col, children: next });
+      // A child lives inside the column now (its x/y is stale), so drop any arrows/lines that
+      // pointed at it — otherwise they'd dangle to its old position.
+      pruneConnections(new Set([childId]));
+      for (const ln of Array.from(c.lines.values())) {
+        if (ln.a.elementId === childId || ln.b.elementId === childId) c.lines.delete(ln.id);
+      }
     });
   };
   // Pop a child out of its column to a free position on the canvas.
@@ -1120,6 +1142,168 @@ export function Canvas({
       const child = c.elements.get(childId);
       if (child) c.elements.set(childId, { ...child, x, y });
     });
+  };
+
+  // --- Context-menu actions ---
+  const nextZ = () => Math.max(0, ...elements.map((e) => e.z ?? 0)) + 1;
+  const bringToFront = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    let z = nextZ();
+    c.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, z: z++ }); }));
+  };
+  const sendToBack = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    let z = Math.min(0, ...elements.map((e) => e.z ?? 0)) - ids.length;
+    c.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, z: z++ }); }));
+  };
+  const toggleLock = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    const allLocked = ids.every((id) => c.elements.get(id)?.locked);
+    c.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, locked: !allLocked }); }));
+  };
+  // Duplicate elements (offset, on top). Columns deep-copy their children with fresh ids.
+  const duplicate = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    const fresh: string[] = [];
+    c.doc.transact(() => {
+      let z = nextZ();
+      for (const id of ids) {
+        const e = c.elements.get(id);
+        if (!e) continue;
+        const nid = crypto.randomUUID();
+        if (e.type === "column") {
+          const map = new Map<string, string>();
+          for (const cid of e.children) {
+            const ch = c.elements.get(cid);
+            if (!ch) continue;
+            const ncid = crypto.randomUUID();
+            map.set(cid, ncid);
+            c.elements.set(ncid, { ...ch, id: ncid, z: z++ } as Element);
+          }
+          c.elements.set(nid, { ...e, id: nid, x: e.x + 24, y: e.y + 24, z: z++, children: e.children.map((cid) => map.get(cid)).filter(Boolean) as string[] } as Element);
+        } else {
+          c.elements.set(nid, { ...e, id: nid, x: e.x + 24, y: e.y + 24, z: z++ } as Element);
+        }
+        fresh.push(nid);
+      }
+    });
+    setSelectedIds(fresh);
+    setSelectedConn(null);
+    setSelectedLine(null);
+  };
+  // Wrap the selected (non-column) elements into a new column at their top-left.
+  const groupIntoColumn = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    const els = ids.map((id) => c.elements.get(id)).filter((e): e is Element => !!e && e.type !== "column");
+    if (!els.length) return;
+    const minX = Math.min(...els.map((e) => e.x));
+    const minY = Math.min(...els.map((e) => e.y));
+    const id = crypto.randomUUID();
+    c.elements.set(id, { id, type: "column", x: minX, y: minY, w: 280, h: 120, title: "", children: els.map((e) => e.id), z: nextZ(), style: { fill: "#ffffff" } });
+    selectNew(id);
+  };
+
+  // Copy elements (deep, with column children) into the internal clipboard.
+  const copyEls = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    const out: Element[] = [];
+    for (const id of ids) {
+      const e = c.elements.get(id);
+      if (!e) continue;
+      out.push(structuredClone(e));
+      if (e.type === "column") for (const cid of e.children) { const ch = c.elements.get(cid); if (ch) out.push(structuredClone(ch)); }
+    }
+    clipboardRef.current = out;
+  };
+  // Paste clipboard elements with fresh ids near (x,y), remapping column children.
+  const pasteEls = (x: number, y: number) => {
+    const c = connRef.current;
+    const clip = clipboardRef.current;
+    if (!c || !clip.length) return;
+    const idMap = new Map<string, string>();
+    for (const e of clip) idMap.set(e.id, crypto.randomUUID());
+    // Anchor the paste so the first element lands at (x,y).
+    const ox = x - clip[0]!.x;
+    const oy = y - clip[0]!.y;
+    const roots: string[] = [];
+    const childIds = new Set(clip.filter((e) => e.type === "column").flatMap((e) => (e.type === "column" ? e.children : [])));
+    let z = nextZ();
+    c.doc.transact(() => {
+      for (const e of clip) {
+        const nid = idMap.get(e.id)!;
+        const copy: Element = { ...structuredClone(e), id: nid, x: e.x + ox, y: e.y + oy, z: z++ } as Element;
+        if (copy.type === "column") copy.children = copy.children.map((cid) => idMap.get(cid) ?? cid);
+        c.elements.set(nid, copy);
+        if (!childIds.has(e.id)) roots.push(nid);
+      }
+    });
+    setSelectedIds(roots);
+    setSelectedConn(null);
+    setSelectedLine(null);
+  };
+  // Apply the copied element's style to the selection (paste-styles).
+  const pasteStyles = (ids: string[]) => {
+    const src = clipboardRef.current[0];
+    if (!src?.style) return;
+    const c = connRef.current;
+    c?.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, style: { ...e.style, ...src.style } }); }));
+  };
+  // Rename: drop into edit mode for elements with an editable title/text.
+  const renameEl = (id: string) => {
+    const e = elementsById.get(id);
+    if (!e) return;
+    selectId(id);
+    if (e.type === "note" || e.type === "text" || e.type === "todo") setEditingId(id);
+  };
+
+  // Open the menu for an element: select it (unless already in a multi-selection), then position.
+  const openMenu = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (readOnly) return;
+    const ids = selectedIds.includes(id) ? selectedIds : [id];
+    if (!selectedIds.includes(id)) selectId(id);
+    setMenu({ x: e.clientX, y: e.clientY, ids });
+  };
+  // Right-click empty canvas → a small menu (paste / select all).
+  const openCanvasMenu = (e: React.MouseEvent) => {
+    if (readOnly) return;
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, ids: [] });
+  };
+  // Build the menu items for the current target ids ([] = empty-canvas menu).
+  const menuItems = (ids: string[]): MenuItem[] => {
+    if (!ids.length) {
+      const at = menu ? toWorld(menu.x, menu.y) : viewportCentre();
+      return [
+        { label: "Paste", shortcut: "⌘V", disabled: !clipboardRef.current.length, onClick: () => pasteEls(at.x, at.y) },
+        { label: "Select all", onClick: () => setSelectedIds(topElements.map((el) => el.id)) },
+      ];
+    }
+    const els = ids.map((id) => elementsById.get(id)).filter(Boolean) as Element[];
+    const allLocked = els.length > 0 && els.every((e) => e.locked);
+    const groupable = els.length >= 1 && els.every((e) => e.type !== "column") && ids.every((id) => !childToCol.has(id));
+    const renamable = ids.length === 1 && ["note", "text", "todo", "column"].includes(els[0]?.type ?? "");
+    return [
+      { label: "Copy", shortcut: "⌘C", onClick: () => copyEls(ids) },
+      { label: "Cut", shortcut: "⌘X", onClick: () => { copyEls(ids); removeMany(ids); } },
+      { label: "Paste styles", disabled: !clipboardRef.current[0]?.style, onClick: () => pasteStyles(ids) },
+      { label: "Duplicate", shortcut: "⌘D", onClick: () => duplicate(ids) },
+      ...(renamable ? ([{ label: "Rename", onClick: () => renameEl(ids[0]!) }] as MenuItem[]) : []),
+      ...(groupable ? ([{ label: "Group into column", onClick: () => groupIntoColumn(ids) }] as MenuItem[]) : []),
+      { label: allLocked ? "Unlock position" : "Lock position", onClick: () => toggleLock(ids) },
+      "separator",
+      { label: "Bring to front", onClick: () => bringToFront(ids) },
+      { label: "Send to back", onClick: () => sendToBack(ids) },
+      "separator",
+      { label: "Delete", shortcut: "⌫", danger: true, onClick: () => removeMany(ids) },
+    ];
   };
 
   // Press-and-drag from a tool: spawn the default/placeholder element under the cursor; it follows
@@ -1826,6 +2010,7 @@ export function Canvas({
       }
       onSelect={() => selectId(el.id)}
       onToggleSelect={() => toggleSelect(el.id)}
+      onContextMenu={(e) => openMenu(el.id, e)}
       onEdit={() => setEditingId(el.id)}
       onMove={(x, y) => moveElement(el.id, x, y)}
       onResize={(w, h) => patch(el.id, { w, h })}
@@ -2147,6 +2332,7 @@ export function Canvas({
         onPointerDown={onViewportPointerDown}
         onPointerMove={onViewportPointerMove}
         onPointerUp={onViewportPointerUp}
+        onContextMenu={openCanvasMenu}
         onDragOver={(e) => {
           e.preventDefault();
           if (!dragOver) setDragOver(true);
@@ -2343,6 +2529,8 @@ export function Canvas({
           showCommentsRef.current = false;
         }}
       />
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
 
       {/* Detached preview of a column child following the cursor while dragging it out. */}
       {childDragGhost && elementsById.get(childDragGhost.id) && (
@@ -3424,6 +3612,7 @@ function ElementCard({
   imgUrl,
   onSelect,
   onToggleSelect,
+  onContextMenu,
   onEdit,
   onMove,
   onResize,
@@ -3457,6 +3646,7 @@ function ElementCard({
   imgUrl?: string;
   onSelect: () => void;
   onToggleSelect?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   onEdit: () => void;
   onMove: (x: number, y: number) => void;
   onResize: (w: number, h: number) => void;
@@ -3495,7 +3685,7 @@ function ElementCard({
   // Element types with an inline editable text zone — these enter edit mode on the second click
   // (first click just selects), same as a note. Images only when their caption is shown.
   const editsText =
-    isText || el.type === "todo" || (el.type === "image" && !!el.showCaption);
+    isText || el.type === "todo" || el.type === "column" || (el.type === "image" && !!el.showCaption);
 
   // Report rendered height so connection endpoints anchor to the real card edge (auto-height cards).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -3541,7 +3731,7 @@ function ElementCard({
       if (!editing && !readOnly) onEmbeddedDragStart?.(e);
       return;
     }
-    if (!editing && !readOnly) {
+    if (!editing && !readOnly && !el.locked) {
       const w = toWorld(e.clientX, e.clientY);
       grab.current = { x: w.x - el.x, y: w.y - el.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -3582,7 +3772,7 @@ function ElementCard({
   };
 
   const startResize = (e: React.PointerEvent) => {
-    if (readOnly) return;
+    if (readOnly || el.locked) return;
     e.stopPropagation();
     dragged.current = true;
     size.current = { x: e.clientX, y: e.clientY, w: el.w, h: el.h };
@@ -3640,6 +3830,7 @@ function ElementCard({
       onPointerUp={onPointerUp}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
       className={`${embedded ? "relative w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
@@ -3886,9 +4077,10 @@ function ElementCard({
                 />
               </button>
             )}
-            {/* Two-stage: a plain title until the column is selected, then an editable input. */}
-            {selected && !readOnly ? (
+            {/* Two-stage: a plain title until the column is in edit mode (the second click). */}
+            {editing && !readOnly ? (
               <input
+                autoFocus
                 value={el.title ?? ""}
                 onChange={(e) => onColumnTitle?.(e.target.value)}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -3945,7 +4137,7 @@ function ElementCard({
         />
       )}
 
-      {!readOnly && !embedded && (
+      {!readOnly && !embedded && !el.locked && (
         <div
           onPointerDown={startResize}
           onPointerMove={onResizeMove}

@@ -31,6 +31,8 @@ const Base = {
   w: z.number().min(0),
   h: z.number().min(0),
   rotation: z.number().optional(),
+  z: z.number().optional(), // stacking order (bring to front / send to back)
+  locked: z.boolean().optional(), // pinned in place (no move/resize)
   style: Style.optional(),
 };
 

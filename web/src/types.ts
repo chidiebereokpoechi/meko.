@@ -20,6 +20,8 @@ interface Base {
   w: number;
   h: number;
   rotation?: number;
+  z?: number;
+  locked?: boolean;
   style?: ElementStyle;
 }
 
