@@ -18,7 +18,6 @@ import {
   faviconUrl,
 } from "../lib/embed.ts";
 import type {
-  AnchorKey,
   Board,
   Connection,
   Element,
@@ -41,13 +40,28 @@ import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
 import { sanitizeHtml } from "../lib/sanitize.ts";
-
-const WORLD_W = 4000;
-const WORLD_H = 3000;
-// Remembered choice for a dropped URL that could be an image or a link card (localStorage).
-const URL_CHOICE_KEY = "meko.urlDropChoice";
-// Remembered choice for an embeddable provider URL: "link" (with preview) or "embed".
-const EMBED_CHOICE_KEY = "meko.embedDropChoice";
+import { EMBED_CHOICE_KEY, GRID_DOT_COLOR, URL_CHOICE_KEY, WORLD_H, WORLD_W } from "./canvas/constants.ts";
+import {
+  CONN_DEFAULT,
+  type ConnLine,
+  type LineGeo,
+  type Pt,
+  computeLineGeo,
+  computeLines,
+  connPath,
+  edgePoint,
+  nearestAnchor,
+  resolveEnd,
+} from "./canvas/geometry.ts";
+import {
+  escapeText,
+  htmlVisibleText,
+  isImageUrl,
+  linkHost,
+  loadImageSize,
+  parseClipboardHtmlAll,
+  siteName,
+} from "./canvas/url.ts";
 
 export interface BoardControls {
   undo: () => void;
@@ -2407,11 +2421,12 @@ export function Canvas({
         <div className="h-full w-full">
           <div
             ref={surfaceRef}
-            className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#b4bccb_1px,transparent_1px)]" : ""}`}
+            className="absolute left-0 top-0 origin-top-left [background-size:24px_24px]"
             style={{
               width: WORLD_W,
               height: WORLD_H,
               transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
+              backgroundImage: showGrid ? `radial-gradient(circle, ${GRID_DOT_COLOR} 1px, transparent 1px)` : undefined,
             }}
           >
             {/* Lines render behind elements; handles + labels render above (after the cards). */}
@@ -2579,192 +2594,6 @@ function PeerCursor({ peer, zoom }: { peer: Peer; zoom: number }) {
       </span>
     </div>
   );
-}
-
-// Point on an element's border in the direction of (tx,ty) — where an arrow should touch.
-function edgePoint(
-  e: Element,
-  tx: number,
-  ty: number,
-): { x: number; y: number } {
-  const x = e.x + e.w / 2;
-  const y = e.y + e.h / 2;
-  const dx = tx - x;
-  const dy = ty - y;
-  if (!dx && !dy) return { x, y };
-  const s =
-    1 / Math.max(Math.abs(dx) / (e.w / 2 || 1), Math.abs(dy) / (e.h / 2 || 1));
-  return { x: x + dx * s, y: y + dy * s };
-}
-
-// The 9 snap anchors of an element: corners, edge-midpoints, centre.
-const ANCHOR_KEYS: AnchorKey[] = [
-  "tl",
-  "tm",
-  "tr",
-  "lm",
-  "c",
-  "rm",
-  "bl",
-  "bm",
-  "br",
-];
-function anchorPoint(el: Element, key: AnchorKey): { x: number; y: number } {
-  const left = key === "tl" || key === "lm" || key === "bl";
-  const right = key === "tr" || key === "rm" || key === "br";
-  const top = key === "tl" || key === "tm" || key === "tr";
-  const bottom = key === "bl" || key === "bm" || key === "br";
-  return {
-    x: left ? el.x : right ? el.x + el.w : el.x + el.w / 2,
-    y: top ? el.y : bottom ? el.y + el.h : el.y + el.h / 2,
-  };
-}
-// Nearest element anchor to a world point within threshold; null if none close.
-function nearestAnchor(
-  p: { x: number; y: number },
-  els: Element[],
-  threshold: number,
-): {
-  elementId: string;
-  anchor: AnchorKey;
-  pt: { x: number; y: number };
-} | null {
-  let best: {
-    elementId: string;
-    anchor: AnchorKey;
-    pt: { x: number; y: number };
-  } | null = null;
-  let bestD = threshold;
-  for (const el of els) {
-    for (const k of ANCHOR_KEYS) {
-      const a = anchorPoint(el, k);
-      const d = Math.hypot(a.x - p.x, a.y - p.y);
-      if (d < bestD) {
-        bestD = d;
-        best = { elementId: el.id, anchor: k, pt: a };
-      }
-    }
-  }
-  return best;
-}
-// Resolve a line endpoint to a world point — a pinned endpoint tracks its element's anchor.
-function resolveEnd(
-  ep: LineEndpoint,
-  byId: Map<string, Element>,
-): { x: number; y: number } {
-  if (ep.elementId && ep.anchor) {
-    const el = byId.get(ep.elementId);
-    if (el) return anchorPoint(el, ep.anchor);
-  }
-  return { x: ep.x, y: ep.y };
-}
-
-type Pt = { x: number; y: number };
-export interface ConnLine {
-  c: Connection;
-  p1: Pt; // visible edge endpoints (for handles + label midpoint)
-  p2: Pt;
-  ctrl: Pt | null; // quadratic control point when bent, else null (straight)
-  handle: Pt; // midpoint bend handle (sits on the line)
-  d: string; // SVG path — drawn from element CENTRES (behind the card) for ends without an arrow,
-}
-
-// Resolve each connection's geometry. The path is drawn from a card's CENTRE when that end has no
-// arrowhead, so the line tucks behind the card and emerges cleanly at its edge regardless of the
-// card's exact size; the arrowhead end anchors on the border so the head sits at the edge. Handles
-// and the label use the visible edge points. A dragged endpoint follows the cursor.
-function computeLines(
-  elements: Element[],
-  connections: Connection[],
-  connDrag: { id: string; which: "from" | "to"; pos: Pt } | null,
-): ConnLine[] {
-  const byId = new Map(elements.map((e) => [e.id, e]));
-  const out: ConnLine[] = [];
-  for (const c of connections) {
-    const from = byId.get(c.from);
-    const to = byId.get(c.to);
-    if (!from || !to) continue;
-    const fromC = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
-    const toC = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
-    const ctrl = c.bend
-      ? {
-          x: (fromC.x + toC.x) / 2 + c.bend.x,
-          y: (fromC.y + toC.y) / 2 + c.bend.y,
-        }
-      : null;
-    const dragFrom = connDrag?.id === c.id && connDrag.which === "from";
-    const dragTo = connDrag?.id === c.id && connDrag.which === "to";
-    const fromAim = ctrl ?? (dragTo ? connDrag!.pos : toC);
-    const toAim = ctrl ?? (dragFrom ? connDrag!.pos : fromC);
-    const edge1 = dragFrom
-      ? connDrag!.pos
-      : edgePoint(from, fromAim.x, fromAim.y);
-    const edge2 = dragTo ? connDrag!.pos : edgePoint(to, toAim.x, toAim.y);
-    const startArrow = c.arrowStart ?? false;
-    const endArrow = c.arrowEnd ?? true;
-    // Draw from centre (behind card) on ends without an arrowhead; from edge when arrowed.
-    const draw1 = dragFrom ? connDrag!.pos : startArrow ? edge1 : fromC;
-    const draw2 = dragTo ? connDrag!.pos : endArrow ? edge2 : toC;
-    const handle = ctrl
-      ? {
-          x: 0.25 * edge1.x + 0.5 * ctrl.x + 0.25 * edge2.x,
-          y: 0.25 * edge1.y + 0.5 * ctrl.y + 0.25 * edge2.y,
-        }
-      : { x: (edge1.x + edge2.x) / 2, y: (edge1.y + edge2.y) / 2 };
-    out.push({
-      c,
-      p1: edge1,
-      p2: edge2,
-      ctrl,
-      handle,
-      d: connPath(draw1, draw2, ctrl),
-    });
-  }
-  return out;
-}
-
-// Straight by default; a quadratic through the control point when bent.
-function connPath(p1: Pt, p2: Pt, ctrl: Pt | null): string {
-  return ctrl
-    ? `M${p1.x},${p1.y} Q${ctrl.x},${ctrl.y} ${p2.x},${p2.y}`
-    : `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
-}
-
-const CONN_DEFAULT = "#475569"; // slate-600
-
-export interface LineGeo {
-  l: LineShape;
-  a: Pt;
-  b: Pt;
-  ctrl: Pt | null;
-  handle: Pt;
-  d: string;
-}
-// Resolve standalone-line geometry (endpoints + optional bend), honouring a dragged endpoint.
-function computeLineGeo(
-  lines: LineShape[],
-  elements: Element[],
-  lineDrag: { id: string; which: "a" | "b"; ep: LineEndpoint } | null,
-): LineGeo[] {
-  const byId = new Map(elements.map((e) => [e.id, e]));
-  return lines.map((l) => {
-    const aEp =
-      lineDrag?.id === l.id && lineDrag.which === "a" ? lineDrag.ep : l.a;
-    const bEp =
-      lineDrag?.id === l.id && lineDrag.which === "b" ? lineDrag.ep : l.b;
-    const a = resolveEnd(aEp, byId);
-    const b = resolveEnd(bEp, byId);
-    const ctrl = l.bend
-      ? { x: (a.x + b.x) / 2 + l.bend.x, y: (a.y + b.y) / 2 + l.bend.y }
-      : null;
-    const handle = ctrl
-      ? {
-          x: 0.25 * a.x + 0.5 * ctrl.x + 0.25 * b.x,
-          y: 0.25 * a.y + 0.5 * ctrl.y + 0.25 * b.y,
-        }
-      : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    return { l, a, b, ctrl, handle, d: connPath(a, b, ctrl) };
-  });
 }
 
 // Standalone-line paths (behind elements). `draw` is the in-progress line being drawn.
@@ -3260,107 +3089,6 @@ function UrlChoiceModal({
       </label>
     </Modal>
   );
-}
-
-function linkHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-// Human site name from a URL: the registrable label, capitalised. uk.pinterest.com → "Pinterest",
-// example.co.uk → "Example". Falls back to the host.
-const TWO_LEVEL_TLD = new Set(["co", "com", "org", "net", "gov", "ac", "edu"]);
-// Visible text of an HTML clipboard payload (note text often lives only here, not in text/plain).
-function htmlVisibleText(html: string): string {
-  if (!html) return "";
-  try {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    doc.querySelectorAll("script, style, iframe").forEach((n) => n.remove());
-    return (doc.body?.textContent ?? "")
-      .replace(/\s+\n/g, "\n")
-      .replace(/[ \t]{2,}/g, " ")
-      .trim();
-  } catch {
-    return "";
-  }
-}
-
-// All droppable items in a clipboard text/html payload, in document order (Milanote multi-select).
-function parseClipboardHtmlAll(
-  html: string,
-): { kind: "iframe" | "img" | "link"; value: string }[] {
-  if (!html) return [];
-  let doc: Document;
-  try {
-    doc = new DOMParser().parseFromString(html, "text/html");
-  } catch {
-    return [];
-  }
-  const out: { kind: "iframe" | "img" | "link"; value: string }[] = [];
-  doc.querySelectorAll("iframe[src], img[src], a[href]").forEach((node) => {
-    const el = node as HTMLElement;
-    if (el.tagName === "IFRAME") {
-      const v = el.getAttribute("src");
-      if (v && /^https?:/i.test(v)) out.push({ kind: "iframe", value: v });
-    } else if (el.tagName === "IMG") {
-      const v = el.getAttribute("src");
-      if (v && /^https?:/i.test(v)) out.push({ kind: "img", value: v });
-    } else if (el.tagName === "A") {
-      if (el.querySelector("img, iframe")) return; // wrapper around media already captured
-      const v = el.getAttribute("href");
-      if (v && /^https?:/i.test(v)) out.push({ kind: "link", value: v });
-    }
-  });
-  return out;
-}
-
-function escapeText(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function siteName(url: string): string {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    const parts = host.split(".");
-    let idx = parts.length - 2;
-    if (parts.length > 2 && TWO_LEVEL_TLD.has(parts[parts.length - 2]!))
-      idx = parts.length - 3;
-    const name = parts[idx] ?? host;
-    return name.charAt(0).toUpperCase() + name.slice(1);
-  } catch {
-    return linkHost(url);
-  }
-}
-
-// Load an image's natural dimensions (falls back to 4:3 on error).
-function loadImageSize(url: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () =>
-      resolve({ w: img.naturalWidth || 4, h: img.naturalHeight || 3 });
-    img.onerror = () => resolve({ w: 4, h: 3 });
-    img.src = url;
-  });
-}
-
-// An http(s) URL whose path ends in an image extension → render directly as an image element.
-function isImageUrl(u: string): boolean {
-  try {
-    const url = new URL(u);
-    return (
-      /^https?:$/.test(url.protocol) &&
-      /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(url.pathname)
-    );
-  } catch {
-    return false;
-  }
 }
 
 // Editable caption beneath an image (uncontrolled contentEditable; sanitised HTML persisted to
