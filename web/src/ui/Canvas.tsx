@@ -55,6 +55,7 @@ import {
 } from "./canvas/render.tsx";
 import { EmbedChoiceModal, UrlChoiceModal } from "./canvas/ChoiceModals.tsx";
 import { ElementCard } from "./canvas/ElementCard.tsx";
+import { useViewport } from "./canvas/useViewport.ts";
 
 export interface BoardControls {
   undo: () => void;
@@ -97,15 +98,9 @@ export function Canvas({
   const clipboardRef = useRef<Element[]>([]);
   const editorRef = useRef<ActiveEditor | null>(null);
   const savedRange = useRef<Range | null>(null);
-  const panRef = useRef<{
-    cx: number;
-    cy: number;
-    px: number;
-    py: number;
-  } | null>(null);
   const [, setTick] = useState(0);
-  // Pan offset (screen px) + zoom applied to the world via CSS transform.
-  const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
+  // Pan/zoom viewport state + helpers (toWorld, clamping, wheel/space) live in useViewport.
+  const { view, panRef, spaceRef, toWorld, viewportCentre, setViewClamped, setZoom, resetView, zoomToFit } = useViewport(viewportRef, surfaceRef);
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [busy, setBusy] = useState(false);
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
@@ -136,7 +131,6 @@ export function Canvas({
     y0: number;
     additive: boolean;
   } | null>(null);
-  const spaceRef = useRef(false); // space held → drag pans instead of marquees
   const [captionEditing, setCaptionEditing] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [showComments, setShowComments] = useState(false);
@@ -587,16 +581,6 @@ export function Canvas({
     return () => document.removeEventListener("selectionchange", onSel);
   }, []);
 
-  // Screen point → world coords. The world's bounding rect already reflects the pan/zoom transform,
-  // so dividing the offset by zoom yields world coordinates.
-  const toWorld = (clientX: number, clientY: number) => {
-    const r = surfaceRef.current?.getBoundingClientRect();
-    if (!r) return { x: 0, y: 0 };
-    return {
-      x: (clientX - r.left) / view.zoom,
-      y: (clientY - r.top) / view.zoom,
-    };
-  };
 
   // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
   // to whatever element sits under the cursor.
@@ -816,78 +800,6 @@ export function Canvas({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  const viewportCentre = () => {
-    const r = viewportRef.current?.getBoundingClientRect();
-    if (!r) return { x: 200, y: 200 };
-    const c = toWorld(r.left + r.width / 2, r.top + r.height / 2);
-    return { x: c.x - 110, y: c.y - 60 };
-  };
-
-  // --- Pan & zoom ---
-  const clampZoom = (z: number) => Math.min(3, Math.max(0.2, z));
-  // Clamp pan so the world can't be dragged out of view: world edges stay flush to the viewport;
-  // when the world is smaller than the viewport (zoomed out) it's centred.
-  const clampView = (v: { x: number; y: number; zoom: number }) => {
-    const vp = viewportRef.current?.getBoundingClientRect();
-    if (!vp) return v;
-    const axis = (pos: number, world: number, viewSize: number) =>
-      world <= viewSize
-        ? (viewSize - world) / 2
-        : Math.min(0, Math.max(viewSize - world, pos));
-    return {
-      zoom: v.zoom,
-      x: axis(v.x, WORLD_W * v.zoom, vp.width),
-      y: axis(v.y, WORLD_H * v.zoom, vp.height),
-    };
-  };
-  const setViewClamped = (fn: (v: typeof view) => typeof view) =>
-    setView((v) => clampView(fn(v)));
-
-  // Zoom toward a screen point, keeping that point fixed in world space.
-  const zoomAt = (clientX: number, clientY: number, factor: number) => {
-    const r = viewportRef.current?.getBoundingClientRect();
-    if (!r) return;
-    setViewClamped((v) => {
-      const z = clampZoom(v.zoom * factor);
-      const k = z / v.zoom;
-      const px = clientX - r.left;
-      const py = clientY - r.top;
-      return { zoom: z, x: px - (px - v.x) * k, y: py - (py - v.y) * k };
-    });
-  };
-  const setZoom = (z: number) => {
-    const r = viewportRef.current?.getBoundingClientRect();
-    if (r)
-      zoomAt(
-        r.left + r.width / 2,
-        r.top + r.height / 2,
-        clampZoom(z) / view.zoom,
-      );
-  };
-
-  // --- View options (surfaced to the top bar's View menu) ---
-  const resetView = () => setView(clampView({ zoom: 1, x: 0, y: 0 }));
-  const zoomToFit = () => {
-    const vp = viewportRef.current?.getBoundingClientRect();
-    if (!vp || elements.length === 0) return resetView();
-    const minX = Math.min(...elements.map((e) => e.x));
-    const minY = Math.min(...elements.map((e) => e.y));
-    const maxX = Math.max(...elements.map((e) => e.x + e.w));
-    const maxY = Math.max(...elements.map((e) => e.y + e.h));
-    const pad = 80;
-    const bw = Math.max(1, maxX - minX);
-    const bh = Math.max(1, maxY - minY);
-    const zoom = clampZoom(
-      Math.min((vp.width - pad * 2) / bw, (vp.height - pad * 2) / bh),
-    );
-    setView(
-      clampView({
-        zoom,
-        x: (vp.width - bw * zoom) / 2 - minX * zoom,
-        y: (vp.height - bh * zoom) / 2 - minY * zoom,
-      }),
-    );
-  };
 
   // Publish the full control set whenever undo state or the view changes (the undo events feed
   // canUndo/canRedo above; zoom/grid come from local state).
@@ -901,7 +813,7 @@ export function Canvas({
       zoomIn: () => setZoom(view.zoom * 1.2),
       zoomOut: () => setZoom(view.zoom / 1.2),
       resetView,
-      zoomToFit,
+      zoomToFit: () => zoomToFit(elements),
       toggleGrid: () => setShowGrid((g) => !g),
       gridOn: showGrid,
       zoomPct: Math.round(view.zoom * 100),
@@ -909,36 +821,6 @@ export function Canvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUndo, canRedo, view.zoom, showGrid, boardId]);
 
-  // Wheel: ⌘/Ctrl (or pinch) zooms toward the cursor; otherwise pans. Native listener so we can
-  // preventDefault (React's onWheel is passive).
-  useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey)
-        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
-      else
-        setViewClamped((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
-    };
-    vp.addEventListener("wheel", onWheel, { passive: false });
-    return () => vp.removeEventListener("wheel", onWheel);
-  }, [view.zoom]);
-
-  // Track Space to switch empty-drag from marquee to pan.
-  useEffect(() => {
-    const set = (down: boolean) => (e: KeyboardEvent) => {
-      if (e.code === "Space") spaceRef.current = down;
-    };
-    const d = set(true);
-    const u = set(false);
-    window.addEventListener("keydown", d);
-    window.addEventListener("keyup", u);
-    return () => {
-      window.removeEventListener("keydown", d);
-      window.removeEventListener("keyup", u);
-    };
-  }, []);
 
   // Empty-canvas drag: Space/middle-button pans; otherwise draws a marquee selection.
   const onViewportPointerDown = (e: React.PointerEvent) => {
