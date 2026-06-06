@@ -15,13 +15,17 @@ import { issueWsTicket } from "@/auth/ws-ticket.ts";
 import { bearerUser } from "@/auth/middleware.ts";
 import { clientIp, enforceRateLimit } from "@/lib/rate-limit.ts";
 import { securityEvent } from "@/lib/logger.ts";
+import { config, oidcEnabled } from "@/config.ts";
+import { redis } from "@/lib/redis.ts";
+import { buildAuthorizeUrl, completeLogin, pkcePair, randomToken } from "@/auth/oidc.ts";
+import { provisionOidcUser } from "@/auth/provision.ts";
 
-// Read the refresh token from the HttpOnly cookie only — never the body or a header (§9g).
-function readRefreshCookie(cookieHeader: string | null): string | null {
+// Read a named cookie value from a Cookie header — never the body or a non-cookie header (§9g).
+function readCookie(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
   for (const part of cookieHeader.split(";")) {
     const [k, ...v] = part.trim().split("=");
-    if (k === "refresh_token") return v.join("=");
+    if (k === name) return v.join("=");
   }
   return null;
 }
@@ -79,7 +83,7 @@ export const auth = new Elysia({ prefix: "/api/auth" })
   )
   // Rotate on every valid use (§9h); issue a fresh access token.
   .post("/refresh", async ({ request, set }) => {
-    const raw = readRefreshCookie(request.headers.get("cookie"));
+    const raw = readCookie(request.headers.get("cookie"), "refresh_token");
     if (!raw) {
       set.status = 401;
       return { error: "NO_REFRESH_TOKEN" };
@@ -100,7 +104,65 @@ export const auth = new Elysia({ prefix: "/api/auth" })
   .post("/logout", ({ set }) => {
     set.headers["set-cookie"] = clearRefreshCookie;
     return { ok: true };
+  })
+  // --- OIDC login via external IdP (Authentik). GET routes = browser navigations. ---
+  // Step 1: stash a CSRF state + nonce + PKCE verifier in Redis, carry the tx id in a short-lived
+  // Lax cookie (Lax so it survives the top-level redirect back from the IdP), 302 to the IdP.
+  .get("/oidc/login", async ({ set }) => {
+    if (!oidcEnabled) return oidcDisabled(set);
+    const tx = randomToken();
+    const state = randomToken();
+    const nonce = randomToken();
+    const { verifier, challenge } = pkcePair();
+    await redis.set(txKey(tx), JSON.stringify({ state, nonce, verifier }), "EX", OIDC_TX_TTL);
+    set.headers["set-cookie"] = txCookie(tx);
+    redirect(set, await buildAuthorizeUrl({ state, nonce, codeChallenge: challenge }));
+  })
+  // Step 2: validate state, exchange the code, verify the id_token, JIT-provision the meko user,
+  // then issue meko's OWN session (rotating refresh cookie, §9h) and 302 to the web app. The SPA's
+  // boot refresh() mints the access token — the IdP is not contacted again.
+  .get("/oidc/callback", async ({ request, query, set }) => {
+    if (!oidcEnabled) return oidcDisabled(set);
+    const tx = readCookie(request.headers.get("cookie"), "oidc_tx");
+    const clearTx = "oidc_tx=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0";
+    const fail = (reason: string) => {
+      securityEvent("auth.oidc_login_failed", { reason });
+      set.headers["set-cookie"] = clearTx;
+      redirect(set, `${config.MEKO_WEB_URL}/?auth_error=${reason}`);
+    };
+
+    if (query.error) return fail(String(query.error));
+    if (!tx || !query.code || !query.state) return fail("missing_params");
+
+    const raw = await redis.getdel(txKey(tx));
+    if (!raw) return fail("expired_tx");
+    const { state, nonce, verifier } = JSON.parse(raw) as { state: string; nonce: string; verifier: string };
+    if (state !== query.state) return fail("state_mismatch");
+
+    try {
+      const claims = await completeLogin(String(query.code), verifier, nonce);
+      const userId = await provisionOidcUser(claims);
+      const refreshRaw = await issueRefreshFamily(userId, request.headers.get("user-agent") ?? undefined, clientIp(request));
+      // Two Set-Cookie headers: clear the tx cookie + install the session refresh cookie.
+      set.headers["set-cookie"] = [clearTx, refreshCookie(refreshRaw)];
+      redirect(set, config.MEKO_WEB_URL);
+    } catch {
+      return fail("verification_failed");
+    }
   });
+
+const OIDC_TX_TTL = 600; // 10 min to complete the round trip
+const txKey = (tx: string) => `oidc:tx:${tx}`;
+const txCookie = (tx: string) => `oidc_tx=${tx}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=${OIDC_TX_TTL}`;
+
+function redirect(set: { status?: number | string; headers: Record<string, string | number | string[]> }, url: string) {
+  set.status = 302;
+  set.headers["location"] = url;
+}
+function oidcDisabled(set: { status?: number | string }) {
+  set.status = 404;
+  return { error: "NOT_FOUND" };
+}
 
 // Authenticated, mints a single-use WS ticket (§5g). Separate group — not IP-rate-limited.
 export const wsTicket = new Elysia({ prefix: "/api" }).post("/ws-ticket", async ({ request, set }) => {

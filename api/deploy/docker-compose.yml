@@ -13,6 +13,12 @@ x-app-env: &app-env
   MEKO_BASE_URL: ${MEKO_BASE_URL:-https://meko.example.com}
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
   MEKO_INTERNAL_TOKEN: ${MEKO_INTERNAL_TOKEN:?set MEKO_INTERNAL_TOKEN}
+  # OIDC login (Authentik). Optional — empty OIDC_ISSUER disables the /api/auth/oidc/* routes.
+  MEKO_WEB_URL: ${MEKO_WEB_URL:-https://meko.example.com}
+  OIDC_ISSUER: ${OIDC_ISSUER:-}
+  OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+  OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+  OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
 
 services:
   db:

@@ -29,10 +29,13 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
-  // Argon2id hash; nullable so future OAuth-only accounts can exist without a password.
+  // Argon2id hash; nullable so OAuth-only accounts can exist without a password.
   passwordHash: text("password_hash"),
+  // Stable subject claim from the OIDC IdP (Authentik), set on first social login. The join key
+  // for provisioning — never key off email, which can change. Nullable: password-only accounts.
+  oidcSub: text("oidc_sub"),
   createdAt: now(),
-}, (t) => [uniqueIndex("users_email_idx").on(t.email)]);
+}, (t) => [uniqueIndex("users_email_idx").on(t.email), uniqueIndex("users_oidc_sub_idx").on(t.oidcSub)]);
 
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),

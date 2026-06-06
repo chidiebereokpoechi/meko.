@@ -30,6 +30,16 @@ const Env = z.object({
   // Used for both CORS and WebSocket Origin validation (§5g/§12l).
   MEKO_ALLOWED_ORIGINS: z.string().default("").transform(csv),
 
+  // OIDC login via an external IdP (Authentik). All optional — OIDC is disabled unless issuer +
+  // client id + secret are all set (see `oidcEnabled`). The IdP authenticates the user; meko still
+  // issues its own session (rotating refresh cookie) and remains the session-of-record.
+  OIDC_ISSUER: z.string().default(""), // discovery: {issuer}/.well-known/openid-configuration
+  OIDC_CLIENT_ID: z.string().default(""),
+  OIDC_CLIENT_SECRET: z.string().default(""),
+  OIDC_REDIRECT_URI: z.string().default(""), // {MEKO_BASE_URL}/api/auth/oidc/callback
+  // Where the OIDC callback sends the browser after a successful login (the SPA origin).
+  MEKO_WEB_URL: z.string().url().default("http://localhost:5173"),
+
   MEKO_MAX_BOARD_BYTES: z.coerce.number().int().positive().default(50 * 1024 * 1024),
   MEKO_SNAPSHOT_RETENTION: z.coerce.number().int().positive().default(3),
   ROUTE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
@@ -72,6 +82,14 @@ export const config = Object.freeze(parsed.data);
 export type Config = typeof config;
 
 export const isProd = config.NODE_ENV === "production";
+
+// OIDC is wired only when the issuer + confidential-client creds are all present. The login/callback
+// routes 404 otherwise, so a half-configured node never exposes a broken auth path.
+export const oidcEnabled = !!(config.OIDC_ISSUER && config.OIDC_CLIENT_ID && config.OIDC_CLIENT_SECRET);
+if (oidcEnabled && !config.OIDC_REDIRECT_URI) {
+  console.error("OIDC_ISSUER set but OIDC_REDIRECT_URI is empty — set it to {MEKO_BASE_URL}/api/auth/oidc/callback");
+  process.exit(1);
+}
 
 // Resolve the two storage roles, each falling back to the single S3_ENDPOINT.
 const s3Internal = config.S3_ENDPOINT_INTERNAL || config.S3_ENDPOINT;
