@@ -6,13 +6,25 @@ OIDC client and still issues its own session — see [meko-auth-oidc-plan.md](..
 
 ## 1. Run Authentik
 
-Optional compose overlay (separate Postgres + Redis from meko's):
+Optional compose overlay (separate Postgres + Redis from meko's). Run from `api/`.
+
+Authentik needs two secrets. `AUTHENTIK_SECRET_KEY` must **persist across restarts** — changing it
+invalidates existing sessions — so write them to a gitignored env file once:
 
 ```bash
-docker compose -f deploy/docker-compose.authentik.yml up -d
+cd api
+printf 'AUTHENTIK_SECRET_KEY=%s\nPG_PASS=%s\n' \
+  "$(openssl rand -base64 60 | tr -d '\n')" \
+  "$(openssl rand -base64 24 | tr -d '\n')" > deploy/authentik.env
+
+docker compose --env-file deploy/authentik.env -f deploy/docker-compose.authentik.yml up -d
 ```
 
-First boot: open `http://localhost:9000/if/flow/initial-setup/` to set the `akadmin` password.
+The overlay pins compose project `meko-authentik`, so it gets its own network/volumes and a `down`
+never touches meko's main `deploy` stack.
+
+First boot runs migrations (~30–60s; expect a transient 502). When ready, open
+`http://localhost:9000/if/flow/initial-setup/` to set the `akadmin` password.
 
 ## 2. Google as a social source
 

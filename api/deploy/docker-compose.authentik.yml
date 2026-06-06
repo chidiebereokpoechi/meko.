@@ -1,7 +1,11 @@
 # Optional Authentik IdP for meko's OIDC login. Standalone overlay — its own Postgres + Redis, NOT
-# wired into meko's compose. Bring up with:
-#   docker compose -f deploy/docker-compose.authentik.yml up -d
-# Then follow deploy/authentik-setup.md. Set AUTHENTIK_SECRET_KEY + PG_PASS in the environment.
+# wired into meko's compose. Bring up with (from api/):
+#   docker compose --env-file deploy/authentik.env -f deploy/docker-compose.authentik.yml up -d
+# Then follow deploy/authentik-setup.md. deploy/authentik.env holds AUTHENTIK_SECRET_KEY + PG_PASS.
+#
+# `name` pins a dedicated compose project so this stack gets its OWN network + volumes and never
+# entangles with meko's main stack (which is project "deploy") — a `down` here can't touch meko.
+name: meko-authentik
 
 services:
   authentik-postgres:
