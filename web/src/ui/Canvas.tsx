@@ -25,7 +25,7 @@ import type {
   LineShape,
   TodoItem,
 } from "../types.ts";
-import { Badge, Button, ContextMenu, Icon, type MenuItem, Modal, toast } from "./kit/index.ts";
+import { Badge, ContextMenu, Icon, type MenuItem, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
 import { LinkSubRail } from "./LinkSubRail.tsx";
@@ -63,6 +63,7 @@ import {
   LineOverlay,
   PeerCursor,
 } from "./canvas/render.tsx";
+import { EmbedChoiceModal, UrlChoiceModal } from "./canvas/ChoiceModals.tsx";
 
 export interface BoardControls {
   undo: () => void;
@@ -2561,103 +2562,6 @@ export function Canvas({
   );
 }
 
-
-// Asks whether a dropped/pasted URL with a preview image should become an image or a link card,
-// with an option to remember the answer.
-// Asks whether an embeddable provider URL should be a link card (with a live preview) or a bare
-// embed, with an option to remember.
-function EmbedChoiceModal({
-  embed,
-  onPick,
-  onClose,
-}: {
-  embed: string;
-  onPick: (kind: "link" | "embed", remember: boolean) => void;
-  onClose: () => void;
-}) {
-  const [remember, setRemember] = useState(false);
-  return (
-    <Modal open onClose={onClose} title="Link or embed?">
-      <iframe
-        src={embed}
-        title="preview"
-        className="h-40 w-full rounded-lg border-2 border-slate-100"
-        style={{ border: 0 }}
-        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
-      />
-      <div className="flex gap-2">
-        <Button className="flex-1" onClick={() => onPick("link", remember)}>
-          <Icon.LinkIcon className="text-base" /> Link + preview
-        </Button>
-        <Button
-          variant="ghost"
-          className="flex-1 border-2 border-slate-200"
-          onClick={() => onPick("embed", remember)}
-        >
-          <Icon.EmbedIcon className="text-base" /> Embed
-        </Button>
-      </div>
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-        <input
-          type="checkbox"
-          checked={remember}
-          onChange={(e) => setRemember(e.target.checked)}
-          className="h-4 w-4 rounded border-2 border-slate-300 accent-primary"
-        />
-        Remember my choice
-      </label>
-    </Modal>
-  );
-}
-
-function UrlChoiceModal({
-  preview,
-  onPick,
-  onClose,
-}: {
-  preview: Unfurl;
-  onPick: (kind: "image" | "link", remember: boolean) => void;
-  onClose: () => void;
-}) {
-  const [remember, setRemember] = useState(false);
-  return (
-    <Modal open onClose={onClose} title="Add as image or link?">
-      {preview.imageUrl && (
-        <img
-          src={preview.imageUrl}
-          alt=""
-          className="max-h-40 w-full rounded-lg border-2 border-slate-100 object-cover"
-        />
-      )}
-      {preview.title && (
-        <p className="truncate text-xs font-bold text-slate-600">
-          {preview.title}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button className="flex-1" onClick={() => onPick("image", remember)}>
-          <Icon.ImageIcon className="text-base" /> Image
-        </Button>
-        <Button
-          variant="ghost"
-          className="flex-1 border-2 border-slate-200"
-          onClick={() => onPick("link", remember)}
-        >
-          <Icon.LinkIcon className="text-base" /> Link
-        </Button>
-      </div>
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-        <input
-          type="checkbox"
-          checked={remember}
-          onChange={(e) => setRemember(e.target.checked)}
-          className="h-4 w-4 rounded border-2 border-slate-300 accent-primary"
-        />
-        Remember my choice
-      </label>
-    </Modal>
-  );
-}
 
 // Editable caption beneath an image (uncontrolled contentEditable; sanitised HTML persisted to
 // Yjs). stopPropagation so editing doesn't drag the card; "Add a caption" placeholder when empty.
