@@ -28,7 +28,7 @@ services:
       - authentik-redis:/data
 
   authentik-server:
-    image: ghcr.io/goauthentik/server:2024.10
+    image: ghcr.io/goauthentik/server:2026.5
     command: server
     environment: &authentik-env
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set AUTHENTIK_SECRET_KEY}
@@ -43,7 +43,7 @@ services:
     depends_on: [authentik-postgres, authentik-redis]
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2024.10
+    image: ghcr.io/goauthentik/server:2026.5
     command: worker
     environment: *authentik-env
     depends_on: [authentik-postgres, authentik-redis]
