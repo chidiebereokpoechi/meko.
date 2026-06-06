@@ -31,7 +31,8 @@ export type Element =
   | (Base & { type: "file"; name: string; downloadUrl: string; size: number })
   | (Base & { type: "embed"; src: string })
   | (Base & { type: "todo"; title?: string; items: TodoItem[] })
-  | (Base & { type: "board"; boardId: string; title?: string });
+  | (Base & { type: "board"; boardId: string; title?: string })
+  | (Base & { type: "column"; title?: string; children: string[]; collapsed?: boolean });
 
 export interface TodoItem {
   id: string;

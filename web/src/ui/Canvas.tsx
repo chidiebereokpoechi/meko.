@@ -16,6 +16,7 @@ import { TodoSubRail } from "./TodoSubRail.tsx";
 import { BoardSubRail } from "./BoardSubRail.tsx";
 import { ConnectionSubRail } from "./ConnectionSubRail.tsx";
 import { EmbedSubRail } from "./EmbedSubRail.tsx";
+import { ColumnSubRail } from "./ColumnSubRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
@@ -60,6 +61,8 @@ export function Canvas({
   const viewportRef = useRef<HTMLDivElement>(null); // the clipping viewport
   const deleteRef = useRef<HTMLDivElement>(null);
   const dropCoords = useRef<{ x: number; y: number } | null>(null);
+  // When set, the next image/link/embed/board dialog fills this placeholder instead of creating new.
+  const fillRef = useRef<{ id: string; kind: "image" | "link" | "embed" | "board" } | null>(null);
   const editorRef = useRef<ActiveEditor | null>(null);
   const savedRange = useRef<Range | null>(null);
   const panRef = useRef<{ cx: number; cy: number; px: number; py: number } | null>(null);
@@ -82,7 +85,7 @@ export function Canvas({
   const [dragOver, setDragOver] = useState(false);
   // Marquee selection rectangle in screen coords while dragging empty canvas.
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const marqueeRef = useRef<{ x0: number; y0: number } | null>(null);
+  const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean } | null>(null);
   const spaceRef = useRef(false); // space held → drag pans instead of marquees
   const [captionEditing, setCaptionEditing] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
@@ -116,6 +119,8 @@ export function Canvas({
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
   const [lineDrag, setLineDrag] = useState<{ id: string; which: "a" | "b"; ep: LineEndpoint } | null>(null);
   const [editingLineLabel, setEditingLineLabel] = useState<string | null>(null);
+  // Live column drop target (highlight + insertion index) while dragging a card.
+  const [colDrop, setColDrop] = useState<{ colId: string; index: number } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -159,6 +164,12 @@ export function Canvas({
   const elements: Element[] = connRef.current
     ? Array.from(connRef.current.elements.values())
     : [];
+  const elementsById = new Map(elements.map((e) => [e.id, e]));
+  // Map a child element id → the column containing it (children are flat in the map; columns
+  // reference them by id and render them inline). Top-level = everything not inside a column.
+  const childToCol = new Map<string, string>();
+  for (const e of elements) if (e.type === "column") for (const cid of e.children) childToCol.set(cid, e.id);
+  const topElements = elements.filter((e) => !childToCol.has(e.id));
   const connections: Connection[] = connRef.current
     ? Array.from(connRef.current.connections.values())
     : [];
@@ -177,6 +188,13 @@ export function Canvas({
   const selectId = (id: string) => {
     setSelectedIds([id]);
     setSelectedConn(null);
+  };
+  // Cmd/Ctrl-click toggles an element in/out of a multi-selection.
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setSelectedConn(null);
+    setSelectedLine(null);
+    setEditingId(null);
   };
   // Select a just-created element so its first click drags/selects (doesn't jump into edit mode).
   const selectNew = (id: string) => {
@@ -265,20 +283,31 @@ export function Canvas({
       if (ids.has(cn.from) || ids.has(cn.to)) c.connections.delete(cn.id);
     }
   };
+  // Expand a delete set to also include the children of any column being deleted.
+  const withColumnChildren = (ids: string[]): Set<string> => {
+    const set = new Set(ids);
+    for (const id of ids) {
+      const e = connRef.current?.elements.get(id);
+      if (e?.type === "column") for (const cid of e.children) set.add(cid);
+    }
+    return set;
+  };
   const remove = (id: string) => {
     const c = connRef.current;
+    const all = withColumnChildren([id]);
     c?.doc.transact(() => {
-      c.elements.delete(id);
-      pruneConnections(new Set([id]));
+      all.forEach((x) => c.elements.delete(x));
+      pruneConnections(all);
     });
-    setSelectedIds((ids) => ids.filter((x) => x !== id));
-    setEditingId((s) => (s === id ? null : s));
+    setSelectedIds((ids) => ids.filter((x) => !all.has(x)));
+    setEditingId((s) => (s && all.has(s) ? null : s));
   };
   const removeMany = (ids: string[]) => {
     const c = connRef.current;
+    const all = withColumnChildren(ids);
     c?.doc.transact(() => {
-      ids.forEach((id) => c.elements.delete(id));
-      pruneConnections(new Set(ids));
+      all.forEach((id) => c.elements.delete(id));
+      pruneConnections(all);
     });
     setSelectedIds([]);
     setEditingId(null);
@@ -297,15 +326,48 @@ export function Canvas({
     const r = deleteRef.current?.getBoundingClientRect();
     return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   };
+  // Column under a screen point + the child index a drop there would land at (via the live DOM).
+  const columnDropAt = (clientX: number, clientY: number, excludeId?: string): { colId: string; index: number } | null => {
+    for (const node of Array.from(document.querySelectorAll<HTMLElement>("[data-column-id]"))) {
+      const colId = node.getAttribute("data-column-id")!;
+      if (colId === excludeId) continue;
+      const r = node.getBoundingClientRect();
+      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+      const kids = Array.from(node.querySelectorAll<HTMLElement>("[data-col-child]"));
+      let index = kids.length;
+      for (let i = 0; i < kids.length; i++) {
+        const kr = kids[i]!.getBoundingClientRect();
+        if (clientY < kr.top + kr.height / 2) {
+          index = i;
+          break;
+        }
+      }
+      return { colId, index };
+    }
+    return null;
+  };
   const handleDragMove = (id: string, x: number, y: number) => {
     setDraggingId(id);
     setOverDelete(overDeleteZone(x, y));
+    // A non-column element dragged over a column previews where it'd drop.
+    setColDrop(elementsById.get(id)?.type === "column" ? null : columnDropAt(x, y, id));
   };
-  // Drop over the Delete tool removes the element; otherwise just end the drag.
+  // Drop over Delete removes; over a column reparents; otherwise just ends the drag. Operates on the
+  // whole selection when the dragged element is part of a multi-selection.
   const handleDragRelease = (id: string, x: number, y: number) => {
-    if (overDeleteZone(x, y)) remove(id);
+    const targets = selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
+    if (overDeleteZone(x, y)) {
+      removeMany(targets);
+    } else {
+      const drop = columnDropAt(x, y, id);
+      if (drop) {
+        const movables = targets.filter((t) => elementsById.get(t)?.type !== "column");
+        movables.forEach((t, i) => moveChildToColumn(t, drop.colId, drop.index + i));
+      }
+    }
     setDraggingId(null);
     setOverDelete(false);
+    setColDrop(null);
   };
 
   // Backspace/Delete removes the selected element — unless a text field is focused (editing).
@@ -436,6 +498,38 @@ export function Canvas({
     window.addEventListener("pointerup", up);
   };
 
+  // Drag a card that lives inside a column: reorder within, move to another column, or pop it out
+  // onto the canvas. A press without movement just selects it.
+  const startColumnChildDrag = (childId: string, e: React.PointerEvent) => {
+    if (readOnly) return;
+    e.stopPropagation();
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) < 4) return;
+      moved = true;
+      setDraggingId(childId);
+      setColDrop(columnDropAt(ev.clientX, ev.clientY));
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDraggingId(null);
+      setColDrop(null);
+      if (!moved) {
+        selectId(childId);
+        return;
+      }
+      const targets = selectedIds.includes(childId) && selectedIds.length > 1 ? selectedIds.filter((tid) => childToCol.has(tid)) : [childId];
+      const drop = columnDropAt(ev.clientX, ev.clientY);
+      if (drop) targets.forEach((t, i) => moveChildToColumn(t, drop.colId, drop.index + i));
+      else {
+        const w = toWorld(ev.clientX, ev.clientY);
+        targets.forEach((t, i) => extractChild(t, w.x, w.y + i * 24));
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   // Drag a selected connection's endpoint to re-anchor it: the endpoint follows the cursor, and on
   // release it reassigns to whatever element is under the pointer (must differ from the other end).
@@ -643,7 +737,7 @@ export function Canvas({
     if (spaceRef.current || e.button === 1) {
       panRef.current = { cx: e.clientX, cy: e.clientY, px: view.x, py: view.y };
     } else {
-      marqueeRef.current = { x0: e.clientX, y0: e.clientY };
+      marqueeRef.current = { x0: e.clientX, y0: e.clientY, additive: e.metaKey || e.ctrlKey || e.shiftKey };
       setMarquee({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY });
     }
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -688,13 +782,14 @@ export function Canvas({
     if (!marquee) return;
     const moved = Math.abs(marquee.x1 - marquee.x0) + Math.abs(marquee.y1 - marquee.y0) > 4;
     if (!moved) {
-      deselect(); // a click on empty canvas
+      if (!m.additive) deselect(); // a click on empty canvas (keep selection when modifier held)
     } else {
-      // Select elements intersecting the marquee (world coords).
+      // Select TOP-LEVEL elements intersecting the marquee (column children have stale x/y and live
+      // inside their column, so they're excluded). Cmd/Ctrl/Shift adds to the current selection.
       const a = toWorld(Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1));
       const b = toWorld(Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1));
-      const hits = elements.filter((el) => el.x < b.x && el.x + el.w > a.x && el.y < b.y && el.y + el.h > a.y).map((el) => el.id);
-      setSelectedIds(hits);
+      const hits = topElements.filter((el) => el.x < b.x && el.x + el.w > a.x && el.y < b.y && el.y + el.h > a.y).map((el) => el.id);
+      setSelectedIds((prev) => (m.additive ? Array.from(new Set([...prev, ...hits])) : hits));
       setEditingId(null);
       setCaptionEditing(false);
     }
@@ -737,18 +832,128 @@ export function Canvas({
     selectNew(id);
   };
 
-  // Create a new board in this workspace and drop a tile that opens it (nested boards).
+  const createColumn = (x: number, y: number) => {
+    const c = connRef.current;
+    if (!c) return;
+    const id = crypto.randomUUID();
+    c.elements.set(id, { id, type: "column", x, y, w: 280, h: 120, title: "", children: [], style: { fill: "#ffffff" } });
+    selectNew(id);
+  };
+
+  // --- Column reparenting (one transaction so it's a single undo step) ---
+  const moveChildToColumn = (childId: string, colId: string, index: number) => {
+    const c = connRef.current;
+    if (!c) return;
+    c.doc.transact(() => {
+      for (const e of c.elements.values()) {
+        if (e.type === "column" && e.children.includes(childId) && e.id !== colId) {
+          c.elements.set(e.id, { ...e, children: e.children.filter((id) => id !== childId) });
+        }
+      }
+      const col = c.elements.get(colId);
+      if (col?.type !== "column") return;
+      const next = col.children.filter((id) => id !== childId);
+      next.splice(Math.max(0, Math.min(index, next.length)), 0, childId);
+      c.elements.set(colId, { ...col, children: next });
+    });
+  };
+  // Pop a child out of its column to a free position on the canvas.
+  const extractChild = (childId: string, x: number, y: number) => {
+    const c = connRef.current;
+    if (!c) return;
+    c.doc.transact(() => {
+      for (const e of c.elements.values()) {
+        if (e.type === "column" && e.children.includes(childId)) {
+          c.elements.set(e.id, { ...e, children: e.children.filter((id) => id !== childId) });
+        }
+      }
+      const child = c.elements.get(childId);
+      if (child) c.elements.set(childId, { ...child, x, y });
+    });
+  };
+
+  // Press-and-drag from a tool: spawn the default/placeholder element under the cursor; it follows
+  // until release. Input tools (image/link/embed/board) then open their dialog to fill the
+  // placeholder (fillRef tells those flows to patch the placeholder rather than create new).
+  const startPlace = (toolKey: string, e: React.PointerEvent) => {
+    if (readOnly) return;
+    const c = connRef.current;
+    if (!c) return;
+    const id = crypto.randomUUID();
+    const w0 = toWorld(e.clientX, e.clientY);
+    let size = { w: 220, h: 120 };
+    let fill: "image" | "link" | "embed" | "board" | null = null;
+    const base = (w: number, h: number) => {
+      size = { w, h };
+      return { id, x: w0.x - w / 2, y: w0.y - h / 2, w, h };
+    };
+    switch (toolKey) {
+      case "note": c.elements.set(id, { ...base(220, 120), type: "note", text: "", style: { fill: "#ffffff" } }); break;
+      case "todo": c.elements.set(id, { ...base(240, 140), type: "todo", title: "", items: [{ id: crypto.randomUUID(), text: "", done: false }], style: { fill: "#ffffff" } }); break;
+      case "column": c.elements.set(id, { ...base(280, 120), type: "column", title: "", children: [], style: { fill: "#ffffff" } }); break;
+      case "image": c.elements.set(id, { ...base(280, 180), type: "image", src: "" }); fill = "image"; break;
+      case "link": c.elements.set(id, { ...base(260, 96), type: "link", url: "" }); fill = "link"; break;
+      case "embed": c.elements.set(id, { ...base(360, 203), type: "embed", src: "" }); fill = "embed"; break;
+      case "board": c.elements.set(id, { ...base(200, 116), type: "board", boardId: "", title: "" }); fill = "board"; break;
+      default: return;
+    }
+    selectNew(id);
+    setDraggingId(id);
+    const intoColumn = toolKey !== "column"; // columns can't nest
+    const move = (ev: PointerEvent) => {
+      const w = toWorld(ev.clientX, ev.clientY);
+      patch(id, { x: w.x - size.w / 2, y: w.y - size.h / 2 });
+      setColDrop(intoColumn ? columnDropAt(ev.clientX, ev.clientY, id) : null);
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDraggingId(null);
+      setColDrop(null);
+      // Dropped onto a column → add as a child.
+      if (intoColumn) {
+        const drop = columnDropAt(ev.clientX, ev.clientY, id);
+        if (drop) moveChildToColumn(id, drop.colId, drop.index);
+      }
+      if (!fill) return;
+      fillRef.current = { id, kind: fill };
+      if (fill === "image") fileRef.current?.click();
+      else if (fill === "link") setLinkModal({ x: 0, y: 0 });
+      else if (fill === "embed") setEmbedModal({ x: 0, y: 0 });
+      else if (fill === "board") setBoardModal({ x: 0, y: 0 });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  // Remove an unfilled placeholder when its fill dialog is dismissed.
+  const cancelFill = (kind: "image" | "link" | "embed" | "board") => {
+    if (fillRef.current?.kind === kind) {
+      connRef.current?.elements.delete(fillRef.current.id);
+      fillRef.current = null;
+    }
+  };
+
+  // Create a new board in this workspace and drop a tile that opens it (nested boards). When filling
+  // a placeholder (drag-placed Board tool), patch that element instead of creating a new tile.
   const createBoardElement = async (title: string) => {
     const c = connRef.current;
     const at = boardModal ?? viewportCentre();
+    const target = fillRef.current?.kind === "board" ? fillRef.current.id : null;
+    fillRef.current = null;
     if (!c) return;
     try {
       const b = await api<Board>(`/api/workspaces/${workspaceId}/boards`, { method: "POST", body: JSON.stringify({ title, parentBoardId: boardId }) });
-      const id = crypto.randomUUID();
-      c.elements.set(id, { id, type: "board", x: at.x, y: at.y, w: 200, h: 116, boardId: b.id, title: b.title, style: { fill: "#ffffff" } });
-      selectNew(id);
+      if (target) {
+        const cur = c.elements.get(target);
+        if (cur?.type === "board") patch(target, { boardId: b.id, title: b.title } as Partial<Element>);
+      } else {
+        const id = crypto.randomUUID();
+        c.elements.set(id, { id, type: "board", x: at.x, y: at.y, w: 200, h: 116, boardId: b.id, title: b.title, style: { fill: "#ffffff" } });
+        selectNew(id);
+      }
     } catch {
       toast("Couldn't create board", "error");
+      if (target) c.elements.delete(target);
     }
   };
 
@@ -764,12 +969,78 @@ export function Canvas({
   // Embed tool: raw embed code only — paste an <iframe …> snippet.
   const createEmbed = (input: string) => {
     const at = embedModal ?? viewportCentre();
+    const target = fillRef.current?.kind === "embed" ? fillRef.current.id : null;
+    fillRef.current = null;
     const src = extractIframeSrc(input);
     if (!src) {
       toast("Paste embed code (an <iframe> snippet)", "error");
+      if (target) connRef.current?.elements.delete(target);
       return;
     }
-    dropEmbed(src, at.x, at.y);
+    if (target) {
+      const cur = connRef.current?.elements.get(target);
+      if (cur?.type === "embed") patch(target, { src, h: embedHeightFor(src, cur.w) } as Partial<Element>);
+    } else dropEmbed(src, at.x, at.y);
+  };
+
+  // Unfurl + drop a link card at a point; returns an approximate height for column stacking.
+  const makeLinkAt = async (url: string, x: number, y: number): Promise<number> => {
+    try {
+      const u = await unfurlLink(boardId, url);
+      dropLink(u, url, { x, y });
+      return u.imageUrl ? 230 : 120;
+    } catch {
+      dropLink({ url, title: null, description: null, imageUrl: null }, url, { x, y });
+      return 120;
+    }
+  };
+
+  // Place creators in a vertical column (Milanote-style); each returns its height to stack the next.
+  const pasteColumn = async (makers: Array<(x: number, y: number) => Promise<number> | number>, start?: { x: number; y: number }) => {
+    const at = start ?? viewportCentre();
+    let py = at.y;
+    for (const make of makers) {
+      const h = await make(at.x, py);
+      py += (h || 160) + 16;
+    }
+  };
+
+  // Build element creators from clipboard/drop data and lay them out in a column. Handles multiple
+  // items (image files, or an HTML payload with several images/links/embeds). Returns true if handled.
+  const dropClipboard = (files: File[], text: string, html: string, start?: { x: number; y: number }): boolean => {
+    const makers: Array<(x: number, y: number) => Promise<number> | number> = [];
+    for (const f of files) makers.push((x, y) => addImageFile(f, x, y));
+    const firstTok = text.split(/\s+/)[0] ?? "";
+    if (!files.length) {
+      const iframeSrc = extractIframeSrc(text);
+      if (iframeSrc) {
+        makers.push((x, y) => { dropEmbed(iframeSrc, x, y); return embedHeightFor(iframeSrc, 360); });
+      } else if (/^https?:\/\//i.test(firstTok)) {
+        const at = start ?? viewportCentre();
+        void handleUrl(firstTok, at.x, at.y); // single URL — may prompt image/link or embed
+        return true;
+      } else {
+        const items = parseClipboardHtmlAll(html);
+        if (items.length) {
+          for (const it of items) {
+            if (it.kind === "iframe") makers.push((x, y) => { dropEmbed(it.value, x, y); return embedHeightFor(it.value, 360); });
+            else if (it.kind === "img") makers.push((x, y) => createImageUrl(it.value, x, y));
+            else makers.push((x, y) => makeLinkAt(it.value, x, y));
+          }
+        } else if (text) {
+          makers.push((x, y) => { createNote(x, y, text.slice(0, 10000)); return 140; });
+        }
+      }
+    } else {
+      // Images plus accompanying note text (the text often lives in the HTML, not text/plain).
+      const noteText = text || htmlVisibleText(html);
+      if (noteText && !/^https?:\/\//i.test(noteText.split(/\s+/)[0] ?? "")) {
+        makers.push((x, y) => { createNote(x, y, noteText.slice(0, 10000)); return 140; });
+      }
+    }
+    if (!makers.length) return false;
+    void pasteColumn(makers, start);
+    return true;
   };
 
   const pickImageAt = (x: number, y: number) => {
@@ -803,10 +1074,17 @@ export function Canvas({
   // Manual "Add link" dialog: always a link card (unfurled).
   const createLink = async (url: string, coords?: { x: number; y: number }) => {
     const at = coords ?? linkModal ?? viewportCentre();
+    const target = fillRef.current?.kind === "link" ? fillRef.current.id : null;
+    fillRef.current = null;
     try {
-      dropLink(await unfurlLink(boardId, url), url, at);
+      const u = await unfurlLink(boardId, url);
+      if (target) {
+        const cur = connRef.current?.elements.get(target);
+        if (cur?.type === "link") patch(target, { url: u.url || url, title: u.title ?? undefined, description: u.description ?? undefined, image: u.imageUrl ?? undefined } as Partial<Element>);
+      } else dropLink(u, url, at);
     } catch {
       toast("Couldn't load that link", "error");
+      if (target) connRef.current?.elements.delete(target);
     }
   };
 
@@ -834,7 +1112,7 @@ export function Canvas({
     }
     if (!u.imageUrl) return dropLink(u, url, at); // nothing to choose between
     const remembered = localStorage.getItem(URL_CHOICE_KEY);
-    if (remembered === "image") return void createImageUrl(u.imageUrl, at.x, at.y, url);
+    if (remembered === "image") return void createImageUrl(u.imageUrl, at.x, at.y, url, u.title);
     if (remembered === "link") return dropLink(u, url, at);
     setUrlChoice({ u, url, at });
   };
@@ -844,7 +1122,7 @@ export function Canvas({
     setUrlChoice(null);
     if (!choice) return;
     if (remember) localStorage.setItem(URL_CHOICE_KEY, kind);
-    if (kind === "image" && choice.u.imageUrl) void createImageUrl(choice.u.imageUrl, choice.at.x, choice.at.y, choice.url);
+    if (kind === "image" && choice.u.imageUrl) void createImageUrl(choice.u.imageUrl, choice.at.x, choice.at.y, choice.url, choice.u.title);
     else dropLink(choice.u, choice.url, choice.at);
   };
 
@@ -869,9 +1147,9 @@ export function Canvas({
     else void createProviderLink(choice.url, choice.embed, choice.at);
   };
 
-  const addImageFile = async (file: File, x: number, y: number) => {
+  const addImageFile = async (file: File, x: number, y: number): Promise<number> => {
     const c = connRef.current;
-    if (!c) return;
+    if (!c) return 0;
     setBusy(true);
     try {
       const { mediaId, displayUrl } = await uploadImage(boardId, file);
@@ -879,11 +1157,14 @@ export function Canvas({
       const { w, h } = await loadImageSize(displayUrl);
       const id = crypto.randomUUID();
       const width = 280;
-      c.elements.set(id, { id, type: "image", x, y, w: width, h: Math.max(40, Math.round((width * h) / w)), src: displayUrl, mediaId, alt: file.name });
+      const height = Math.max(40, Math.round((width * h) / w));
+      c.elements.set(id, { id, type: "image", x, y, w: width, h: height, src: displayUrl, mediaId, alt: file.name });
       selectNew(id);
       toast("Image added", "success");
+      return height;
     } catch (err) {
       toast(err instanceof Error ? err.message : "Upload failed", "error");
+      return 0;
     } finally {
       setBusy(false);
     }
@@ -891,30 +1172,56 @@ export function Canvas({
 
   // Image element from an external URL (no upload) — used for image URLs dropped/pasted in. When
   // it came from a web page (the image vs link chooser), attribute the source as a caption.
-  const createImageUrl = async (src: string, x: number, y: number, sourceUrl?: string) => {
+  const createImageUrl = async (src: string, x: number, y: number, sourceUrl?: string, title?: string | null): Promise<number> => {
     const c = connRef.current;
-    if (!c) return;
+    if (!c) return 0;
     const { w, h } = await loadImageSize(src);
     const width = 280;
     const id = crypto.randomUUID();
-    const caption = sourceUrl ? `from <a href="${sourceUrl}">${siteName(sourceUrl)}</a>` : undefined;
+    const height = Math.max(40, Math.round((width * h) / w));
+    // Caption is the page title (hyperlinked to the source), falling back to the site name.
+    const text = (title ?? "").trim() || (sourceUrl ? siteName(sourceUrl) : "");
+    const caption = sourceUrl ? `<a href="${sourceUrl}">${escapeText(text)}</a>` : undefined;
     c.elements.set(id, {
       id,
       type: "image",
       x,
       y,
       w: width,
-      h: Math.max(40, Math.round((width * h) / w)),
+      h: height,
       src,
       ...(caption ? { caption, showCaption: true } : {}),
     });
     selectNew(id);
+    return height + (caption ? 40 : 0);
   };
 
   const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
+    const target = fillRef.current?.kind === "image" ? fillRef.current.id : null;
+    fillRef.current = null;
+    if (!file) {
+      if (target) connRef.current?.elements.delete(target); // picker canceled → drop placeholder
+      return;
+    }
+    if (target) {
+      setBusy(true);
+      try {
+        const { mediaId, displayUrl } = await uploadImage(boardId, file);
+        setMediaUrls((m) => ({ ...m, [mediaId]: displayUrl }));
+        const { w, h } = await loadImageSize(displayUrl);
+        const cur = connRef.current?.elements.get(target);
+        if (cur?.type === "image") patch(target, { src: displayUrl, mediaId, alt: file.name, h: Math.max(40, Math.round((cur.w * h) / w)) } as Partial<Element>);
+        toast("Image added", "success");
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Upload failed", "error");
+        connRef.current?.elements.delete(target);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const at = dropCoords.current ?? viewportCentre();
     await addImageFile(file, at.x, at.y);
   };
@@ -939,46 +1246,10 @@ export function Canvas({
     if (readOnly) return;
     const { x, y } = toWorld(e.clientX, e.clientY);
 
-    const tool = e.dataTransfer.getData("application/x-meko-tool");
-
-    if (tool) {
-      if (tool === "note") createNote(x, y);
-      else if (tool === "image") pickImageAt(x, y);
-      else if (tool === "link") setLinkModal({ x, y });
-      else if (tool === "todo") createTodo(x, y);
-      else if (tool === "board") setBoardModal({ x, y });
-      else if (tool === "embed") setEmbedModal({ x, y });
-      else if (tool === "line") {
-        const c = connRef.current;
-        if (c) {
-          const id = crypto.randomUUID();
-          c.lines.set(id, { id, a: { x, y }, b: { x: x + 160, y }, arrowStart: false, arrowEnd: false });
-          setSelectedLine(id);
-          setSelectedIds([]);
-          setSelectedConn(null);
-        }
-      }
-      return;
-    }
-
-    const images = Array.from(e.dataTransfer.files).filter((f) =>
-      f.type.startsWith("image/"),
-    );
-    if (images.length) {
-      images.forEach((f, i) => void addImageFile(f, x + i * 24, y + i * 24));
-      return;
-    }
-
-    const uri = (
-      e.dataTransfer.getData("text/uri-list") ||
-      e.dataTransfer.getData("text/plain")
-    ).trim();
-    if (!uri) return;
-    const iframeSrc = extractIframeSrc(uri);
-    if (iframeSrc) return dropEmbed(iframeSrc, x, y);
-    const first = uri.split(/\s+/)[0]!;
-    if (/^https?:\/\//i.test(first)) void handleUrl(first, x, y);
-    else createNote(x, y, uri.slice(0, 10000));
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+    const uri = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain")).trim();
+    const html = e.dataTransfer.getData("text/html");
+    dropClipboard(files, uri, html, { x, y });
   };
 
   // Paste anywhere on the board: an image from the clipboard uploads; an image URL becomes an
@@ -998,27 +1269,14 @@ export function Canvas({
         return;
       const dt = e.clipboardData;
       if (!dt) return;
-      const { x, y } = viewportCentre();
-      const file = Array.from(dt.items)
-        .find((it) => it.kind === "file" && it.type.startsWith("image/"))
-        ?.getAsFile();
-      if (file) {
-        e.preventDefault();
-        void addImageFile(file, x, y);
-        return;
-      }
+      // Read all image files synchronously (clipboard items expire after the event).
+      const files = Array.from(dt.items)
+        .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => !!f);
       const text = dt.getData("text").trim();
-      if (!text) return;
-      const iframeSrc = extractIframeSrc(text);
-      if (iframeSrc) {
-        dropEmbed(iframeSrc, x, y);
-        e.preventDefault();
-        return;
-      }
-      const first = text.split(/\s+/)[0]!;
-      if (/^https?:\/\//i.test(first)) void handleUrl(first, x, y);
-      else createNote(x, y, text.slice(0, 10000));
-      e.preventDefault();
+      const html = dt.getData("text/html");
+      if (dropClipboard(files, text, html)) e.preventDefault();
     };
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
@@ -1029,14 +1287,14 @@ export function Canvas({
       key: "note",
       label: "Note",
       icon: <Icon.NoteIcon />,
-      dragKey: "note",
+      onStartPlace: (e) => startPlace("note", e),
       onPlace: () => createNote(viewportCentre().x, viewportCentre().y),
     },
     {
       key: "image",
       label: "Image",
       icon: <Icon.ImageIcon />,
-      dragKey: "image",
+      onStartPlace: (e) => startPlace("image", e),
       onPlace: () => pickImageAt(viewportCentre().x, viewportCentre().y),
       disabled: busy,
     },
@@ -1044,28 +1302,35 @@ export function Canvas({
       key: "link",
       label: "Link",
       icon: <Icon.LinkIcon />,
-      dragKey: "link",
+      onStartPlace: (e) => startPlace("link", e),
       onPlace: () => setLinkModal(viewportCentre()),
     },
     {
       key: "todo",
       label: "To-do",
       icon: <Icon.TodoIcon />,
-      dragKey: "todo",
+      onStartPlace: (e) => startPlace("todo", e),
       onPlace: () => createTodo(viewportCentre().x, viewportCentre().y),
     },
     {
       key: "board",
       label: "Board",
       icon: <Icon.BoardIcon />,
-      dragKey: "board",
+      onStartPlace: (e) => startPlace("board", e),
       onPlace: () => setBoardModal(viewportCentre()),
+    },
+    {
+      key: "column",
+      label: "Column",
+      icon: <Icon.ColumnIcon />,
+      onStartPlace: (e) => startPlace("column", e),
+      onPlace: () => createColumn(viewportCentre().x, viewportCentre().y),
     },
     {
       key: "embed",
       label: "Embed",
       icon: <Icon.EmbedIcon />,
-      dragKey: "embed",
+      onStartPlace: (e) => startPlace("embed", e),
       onPlace: () => setEmbedModal(viewportCentre()),
     },
     {
@@ -1073,7 +1338,6 @@ export function Canvas({
       label: "Line",
       icon: <Icon.LineIcon />,
       active: armLine,
-      dragKey: "line", // drag onto the canvas to drop a default line
       // Click to arm, then drag on the canvas to draw (snaps to element anchors).
       onClick: () => {
         deselect();
@@ -1089,6 +1353,7 @@ export function Canvas({
   const isTodoSelected = selected && selected.type === "todo";
   const isBoardSelected = selected && selected.type === "board";
   const isEmbedSelected = selected && selected.type === "embed";
+  const isColumnSelected = selected && selected.type === "column";
   // Merge a hex into the selected element's style, or delete the key when null.
   const setStyleKey = (key: "fill" | "strip", hex: string | null) => {
     if (!selected) return;
@@ -1135,6 +1400,53 @@ export function Canvas({
   const togglePreviewAll = () => {
     const target = !selectedEls.every((e) => e.type === "link" && !e.hideImage);
     eachSelected((e) => (e.type === "link" ? ({ hideImage: !target } as Partial<Element>) : null));
+  };
+
+  // Render one element card. `embedded` cards live inside a column (relative flow, drag = reparent).
+  const renderElementCard = (el: Element, embedded: boolean) => (
+    <ElementCard
+      key={el.id}
+      el={el}
+      embedded={embedded}
+      selected={selectedIds.includes(el.id)}
+      editing={el.id === editingId}
+      imgUrl={el.type === "image" ? (el.mediaId && mediaUrls[el.mediaId]) || el.src : undefined}
+      onSelect={() => selectId(el.id)}
+      onToggleSelect={() => toggleSelect(el.id)}
+      onEdit={() => setEditingId(el.id)}
+      onMove={(x, y) => moveElement(el.id, x, y)}
+      onResize={(w, h) => patch(el.id, { w, h })}
+      onText={(text) => patch(el.id, { text } as Partial<Element>)}
+      onRegister={(e) => (editorRef.current = e)}
+      onOpen={el.type === "link" ? () => window.open(el.url, "_blank", "noopener,noreferrer") : el.type === "board" ? () => onOpenBoard(el.boardId) : undefined}
+      onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
+      onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
+      onStartLink={(e) => startLink(el.id, e)}
+      onSize={reportHeight}
+      freshlyCreated={justCreated === el.id}
+      onConsumeFresh={() => setJustCreated(null)}
+      readOnly={readOnly}
+      onCaptionFocus={() => {
+        selectId(el.id);
+        setCaptionEditing(true);
+      }}
+      onEmbeddedDragStart={(e) => startColumnChildDrag(el.id, e)}
+      onColumnTitle={el.type === "column" ? (t) => patch(el.id, { title: t } as Partial<Element>) : undefined}
+      onToggleCollapse={el.type === "column" ? () => patch(el.id, { collapsed: !el.collapsed } as Partial<Element>) : undefined}
+      colDropIndex={el.type === "column" && colDrop?.colId === el.id ? colDrop.index : undefined}
+      renderColumnChild={el.type === "column" ? (cid: string) => renderColumnChild(cid) : undefined}
+      shrink={draggingId === el.id && overDelete}
+      dragging={draggingId === el.id}
+      zoom={view.zoom}
+      toWorld={toWorld}
+      onDragMove={(x, y) => handleDragMove(el.id, x, y)}
+      onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
+    />
+  );
+  // Resolve + render a column's child element (embedded).
+  const renderColumnChild = (childId: string) => {
+    const child = elementsById.get(childId);
+    return child ? renderElementCard(child, true) : null;
   };
 
   return (
@@ -1266,6 +1578,17 @@ export function Canvas({
           onStrip={(hex) => setStyleKey("strip", hex)}
           onDelete={() => selectedId && remove(selectedId)}
         />
+      ) : isColumnSelected ? (
+        <ColumnSubRail
+          el={selected}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onToggleCollapse={() => patch(selected.id, { collapsed: !selected.collapsed } as Partial<Element>)}
+          onFill={(hex) => setStyleKey("fill", hex)}
+          onStrip={(hex) => setStyleKey("strip", hex)}
+          onDelete={() => selectedId && remove(selectedId)}
+        />
       ) : (
         <ToolRail
           tools={createTools}
@@ -1286,7 +1609,10 @@ export function Canvas({
         title="Add a link"
         label="Paste a URL"
         submitLabel="Add"
-        onClose={() => setLinkModal(null)}
+        onClose={() => {
+          setLinkModal(null);
+          cancelFill("link");
+        }}
         onSubmit={createLink}
       />
 
@@ -1295,7 +1621,10 @@ export function Canvas({
         title="New board"
         label="Board title"
         submitLabel="Create"
-        onClose={() => setBoardModal(null)}
+        onClose={() => {
+          setBoardModal(null);
+          cancelFill("board");
+        }}
         onSubmit={createBoardElement}
       />
 
@@ -1304,7 +1633,10 @@ export function Canvas({
         title="Embed code"
         label="Paste an <iframe> embed snippet"
         submitLabel="Embed"
-        onClose={() => setEmbedModal(null)}
+        onClose={() => {
+          setEmbedModal(null);
+          cancelFill("embed");
+        }}
         onSubmit={createEmbed}
       />
 
@@ -1401,49 +1733,7 @@ export function Canvas({
                 setEditingId(null);
               }}
             />
-            {elements.map((el) => (
-              <ElementCard
-                key={el.id}
-                el={el}
-                selected={selectedIds.includes(el.id)}
-                editing={el.id === editingId}
-                imgUrl={
-                  el.type === "image"
-                    ? (el.mediaId && mediaUrls[el.mediaId]) || el.src
-                    : undefined
-                }
-                onSelect={() => selectId(el.id)}
-                onEdit={() => setEditingId(el.id)}
-                onMove={(x, y) => moveElement(el.id, x, y)}
-                onResize={(w, h) => patch(el.id, { w, h })}
-                onText={(text) => patch(el.id, { text } as Partial<Element>)}
-                onRegister={(e) => (editorRef.current = e)}
-                onOpen={
-                  el.type === "link"
-                    ? () => window.open(el.url, "_blank", "noopener,noreferrer")
-                    : el.type === "board"
-                      ? () => onOpenBoard(el.boardId)
-                      : undefined
-                }
-                onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
-                onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
-                onStartLink={(e) => startLink(el.id, e)}
-                onSize={reportHeight}
-                freshlyCreated={justCreated === el.id}
-                onConsumeFresh={() => setJustCreated(null)}
-                readOnly={readOnly}
-                onCaptionFocus={() => {
-                  selectId(el.id);
-                  setCaptionEditing(true);
-                }}
-                shrink={draggingId === el.id && overDelete}
-                dragging={draggingId === el.id}
-                zoom={view.zoom}
-                toWorld={toWorld}
-                onDragMove={(x, y) => handleDragMove(el.id, x, y)}
-                onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
-              />
-            ))}
+            {topElements.map((el) => renderElementCard(el, false))}
             {/* Highlight the element a connection drag would land on. */}
             {linkTarget && (() => {
               const t = sizedElements.find((e) => e.id === linkTarget);
@@ -1955,6 +2245,49 @@ function linkHost(url: string): string {
 // Human site name from a URL: the registrable label, capitalised. uk.pinterest.com → "Pinterest",
 // example.co.uk → "Example". Falls back to the host.
 const TWO_LEVEL_TLD = new Set(["co", "com", "org", "net", "gov", "ac", "edu"]);
+// Visible text of an HTML clipboard payload (note text often lives only here, not in text/plain).
+function htmlVisibleText(html: string): string {
+  if (!html) return "";
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style, iframe").forEach((n) => n.remove());
+    return (doc.body?.textContent ?? "").replace(/\s+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+  } catch {
+    return "";
+  }
+}
+
+// All droppable items in a clipboard text/html payload, in document order (Milanote multi-select).
+function parseClipboardHtmlAll(html: string): { kind: "iframe" | "img" | "link"; value: string }[] {
+  if (!html) return [];
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(html, "text/html");
+  } catch {
+    return [];
+  }
+  const out: { kind: "iframe" | "img" | "link"; value: string }[] = [];
+  doc.querySelectorAll("iframe[src], img[src], a[href]").forEach((node) => {
+    const el = node as HTMLElement;
+    if (el.tagName === "IFRAME") {
+      const v = el.getAttribute("src");
+      if (v && /^https?:/i.test(v)) out.push({ kind: "iframe", value: v });
+    } else if (el.tagName === "IMG") {
+      const v = el.getAttribute("src");
+      if (v && /^https?:/i.test(v)) out.push({ kind: "img", value: v });
+    } else if (el.tagName === "A") {
+      if (el.querySelector("img, iframe")) return; // wrapper around media already captured
+      const v = el.getAttribute("href");
+      if (v && /^https?:/i.test(v)) out.push({ kind: "link", value: v });
+    }
+  });
+  return out;
+}
+
+function escapeText(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function siteName(url: string): string {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
@@ -2145,6 +2478,7 @@ function ElementCard({
   editing,
   imgUrl,
   onSelect,
+  onToggleSelect,
   onEdit,
   onMove,
   onResize,
@@ -2158,6 +2492,12 @@ function ElementCard({
   onSize,
   freshlyCreated,
   onConsumeFresh,
+  embedded,
+  onEmbeddedDragStart,
+  onColumnTitle,
+  onToggleCollapse,
+  colDropIndex,
+  renderColumnChild,
   readOnly,
   shrink,
   dragging,
@@ -2171,6 +2511,7 @@ function ElementCard({
   editing: boolean;
   imgUrl?: string;
   onSelect: () => void;
+  onToggleSelect?: () => void;
   onEdit: () => void;
   onMove: (x: number, y: number) => void;
   onResize: (w: number, h: number) => void;
@@ -2184,6 +2525,12 @@ function ElementCard({
   onSize?: (id: string, h: number) => void;
   freshlyCreated?: boolean;
   onConsumeFresh?: () => void;
+  embedded?: boolean;
+  onEmbeddedDragStart?: (e: React.PointerEvent) => void;
+  onColumnTitle?: (t: string) => void;
+  onToggleCollapse?: () => void;
+  colDropIndex?: number;
+  renderColumnChild?: (childId: string) => React.ReactNode;
   readOnly?: boolean;
   shrink: boolean;
   dragging: boolean;
@@ -2218,11 +2565,21 @@ function ElementCard({
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation(); // don't let the canvas deselect / pan
+    // Cmd/Ctrl-click toggles multi-selection (no drag, no edit).
+    if ((e.metaKey || e.ctrlKey) && onToggleSelect) {
+      onToggleSelect();
+      return;
+    }
     // A freshly-dropped element is already selected; treat the first press as a fresh select so it
     // drags rather than entering edit mode.
     justSelected.current = !selected || !!freshlyCreated;
     dragged.current = false;
     if (!selected) onSelect();
+    if (embedded) {
+      // Inside a column: dragging reparents/reorders (handled by the parent), not free movement.
+      if (!editing && !readOnly) onEmbeddedDragStart?.(e);
+      return;
+    }
     if (!editing && !readOnly) {
       const w = toWorld(e.clientX, e.clientY);
       grab.current = { x: w.x - el.x, y: w.y - el.y };
@@ -2242,9 +2599,10 @@ function ElementCard({
     if (freshlyCreated) onConsumeFresh?.(); // subsequent clicks edit normally
   };
   // First click selects; a second click (already selected, no drag) enters edit mode.
-  // Modifier-click (⌘/Ctrl/Alt) opens link elements.
+  // (⌘/Ctrl-click toggles multi-selection — handled in onPointerDown; Alt-click opens.)
   const onClick = (e: React.MouseEvent) => {
-    if ((e.metaKey || e.ctrlKey || e.altKey) && onOpen) {
+    if (e.metaKey || e.ctrlKey) return; // multi-select handled on pointer down
+    if (e.altKey && onOpen) {
       onOpen();
       return;
     }
@@ -2264,7 +2622,7 @@ function ElementCard({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   // Links are content-height (toggling preview/caption resizes the card), so resize is width-only.
-  const autoSize = el.type === "link" || el.type === "image" || el.type === "todo"; // content-height
+  const autoSize = embedded || el.type === "link" || el.type === "image" || el.type === "todo" || el.type === "column"; // content-height
   const lockAspect = el.type === "image"; // resize keeps the image's aspect ratio
   const onResizeMove = (e: React.PointerEvent) => {
     if (!size.current) return;
@@ -2294,6 +2652,8 @@ function ElementCard({
     <div
       ref={rootRef}
       data-selected-element={selected ? "true" : undefined}
+      data-column-id={el.type === "column" ? el.id : undefined}
+      data-col-child={embedded ? el.id : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -2301,11 +2661,11 @@ function ElementCard({
       onDoubleClick={onDoubleClick}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
-      className={`absolute border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
+      className={`${embedded ? "relative mb-2 w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
       style={{
-        left: el.x,
-        top: el.y,
-        width: el.w,
+        left: embedded ? undefined : el.x,
+        top: embedded ? undefined : el.y,
+        width: embedded ? undefined : el.w,
         height: autoSize ? "auto" : el.h,
         background: isText || el.type === "todo" ? (s.fill ?? "#ffffff") : "#fff",
         zIndex: dragging ? 1000 : undefined,
@@ -2315,7 +2675,7 @@ function ElementCard({
       }}
     >
       {isText ? (
-        <div className="flex h-full w-full flex-col overflow-hidden">
+        <div className="relative flex h-full w-full flex-col overflow-hidden">
           {s.strip && (
             <div
               className="h-2.5 w-full shrink-0"
@@ -2332,14 +2692,22 @@ function ElementCard({
               onRegister={onRegister}
             />
           </div>
+          {/* Fade overflowing text out at the bottom (in the note's own colour) when not editing. */}
+          {!editing && (
+            <div
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-8"
+              style={{ background: `linear-gradient(to bottom, transparent, ${s.fill ?? "#ffffff"})` }}
+            />
+          )}
         </div>
       ) : el.type === "image" ? (
         <div className="flex w-full flex-col overflow-hidden bg-white">
           {el.style?.strip && <div className="h-2.5 w-full shrink-0" style={{ background: el.style.strip }} />}
+          {/* Embedded (in a column): height follows the column width via aspect ratio. Free: fixed h. */}
           {imgUrl ? (
-            <img src={imgUrl} alt={el.alt ?? ""} className="w-full object-cover" style={{ height: el.h }} draggable={false} />
+            <img src={imgUrl} alt={el.alt ?? ""} className="w-full object-cover" style={embedded ? { aspectRatio: `${el.w} / ${el.h}` } : { height: el.h }} draggable={false} />
           ) : (
-            <div className="grid place-items-center text-slate-400" style={{ height: el.h }}>
+            <div className="grid place-items-center text-slate-400" style={embedded ? { aspectRatio: `${el.w} / ${el.h}` } : { height: el.h }}>
               image…
             </div>
           )}
@@ -2430,13 +2798,50 @@ function ElementCard({
               (including right after it's dropped). */}
           {!(selected && !readOnly && !freshlyCreated) && <div className="absolute inset-0" />}
         </div>
+      ) : el.type === "column" ? (
+        <div className="flex h-full w-full flex-col overflow-hidden" style={{ background: s.fill ?? "#ffffff" }}>
+          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+          {/* Header: collapse toggle, inline title, card count. */}
+          <div className="flex items-center gap-1 px-2 pt-2">
+            {onToggleCollapse && (
+              <button onPointerDown={(e) => e.stopPropagation()} onClick={onToggleCollapse} className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100">
+                <Icon.ChevronDown className={`text-base transition-transform ${el.collapsed ? "-rotate-90" : ""}`} />
+              </button>
+            )}
+            {/* Two-stage: a plain title until the column is selected, then an editable input. */}
+            {selected && !readOnly ? (
+              <input
+                value={el.title ?? ""}
+                onChange={(e) => onColumnTitle?.(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                placeholder="Column"
+                className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-400"
+              />
+            ) : (
+              <span className={`min-w-0 flex-1 truncate text-sm font-bold ${el.title ? "text-slate-700" : "text-slate-400"}`}>{el.title || "Column"}</span>
+            )}
+          </div>
+          <div className="px-2 pb-1 pl-8 text-[11px] font-bold text-slate-400">{el.children.length} {el.children.length === 1 ? "card" : "cards"}</div>
+          {!el.collapsed && (
+            <div className="flex flex-col px-2 pb-2">
+              {el.children.map((cid, i) => (
+                <div key={cid}>
+                  {colDropIndex === i && <div className="my-0.5 h-0.5 rounded bg-primary" />}
+                  {renderColumnChild?.(cid)}
+                </div>
+              ))}
+              {colDropIndex === el.children.length && <div className="my-0.5 h-0.5 rounded bg-primary" />}
+              {el.children.length === 0 && <div className="rounded-lg border-2 border-dashed border-slate-200 py-6 text-center text-[11px] text-slate-400">Drag cards here</div>}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="grid h-full place-items-center text-slate-400">
           {el.type}
         </div>
       )}
 
-      {selected && onStartLink && !readOnly && (
+      {selected && onStartLink && !readOnly && !embedded && (
         // Connect ball: drag onto another element to wire an arrow between them.
         <button
           onPointerDown={onStartLink}
@@ -2446,7 +2851,7 @@ function ElementCard({
         />
       )}
 
-      {!readOnly && (
+      {!readOnly && !embedded && (
       <div
         onPointerDown={startResize}
         onPointerMove={onResizeMove}

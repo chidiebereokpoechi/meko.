@@ -76,6 +76,11 @@ export const TodoElement = z
   .object({ ...Base, type: z.literal("todo"), title: z.string().max(500).optional(), items: z.array(TodoItem).max(500) })
   .strict();
 
+// A Milanote-style column: a titled container holding an ordered list of child element ids.
+export const ColumnElement = z
+  .object({ ...Base, type: z.literal("column"), title: z.string().max(300).optional(), children: z.array(z.string().min(1)).max(1000), collapsed: z.boolean().optional() })
+  .strict();
+
 // A tile that opens another board in the same workspace (nested boards).
 export const BoardElement = z
   .object({ ...Base, type: z.literal("board"), boardId: z.string().uuid(), title: z.string().max(300).optional() })
@@ -90,6 +95,7 @@ export const Element = z.discriminatedUnion("type", [
   EmbedElement,
   TodoElement,
   BoardElement,
+  ColumnElement,
 ]);
 
 export type Element = z.infer<typeof Element>;

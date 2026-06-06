@@ -10,10 +10,10 @@ export interface Tool {
   disabled?: boolean;
   // Action tool: fires on single click (e.g. Export, Back, formatting toggles).
   onClick?: () => void;
-  // Placeable tool: double-click drops it at the canvas centre; also draggable onto the canvas.
-  // `dragKey` is written to the drag payload so the canvas knows what to create on drop.
+  // Placeable tool: double-click drops it at the canvas centre.
   onPlace?: () => void;
-  dragKey?: string;
+  // Press-and-drag to spawn the element under the cursor and place it on release.
+  onStartPlace?: (e: React.PointerEvent) => void;
   // Highlight the Delete tool while an element is dragged over it.
   deleteActive?: boolean;
 }
@@ -46,15 +46,15 @@ export function ToolRail({
 }
 
 function ToolButton({ tool }: { tool: Tool }) {
-  const placeable = !!tool.dragKey || !!tool.onPlace;
+  const placeable = !!tool.onStartPlace || !!tool.onPlace;
   return (
     <Tooltip label={tool.label} shortcut={tool.shortcut}>
       <button
         onClick={tool.onClick}
         onDoubleClick={tool.onPlace}
         disabled={tool.disabled}
-        draggable={placeable && !tool.disabled}
-        onDragStart={(e) => tool.dragKey && e.dataTransfer.setData("application/x-meko-tool", tool.dragKey)}
+        // Press-and-drag to place the element under the cursor (no HTML5 drag / drop zone).
+        onPointerDown={tool.onStartPlace && !tool.disabled ? (e) => { e.preventDefault(); tool.onStartPlace!(e); } : undefined}
         title=""
         className="group flex w-full flex-col items-center gap-1 py-1.5 disabled:opacity-40"
       >
