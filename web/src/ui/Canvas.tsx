@@ -18,16 +18,8 @@ import type {
   LineShape,
 } from "../types.ts";
 import { Badge, ContextMenu, Icon, type MenuItem, toast } from "./kit/index.ts";
-import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
-import { NoteSubRail } from "./NoteSubRail.tsx";
-import { LinkSubRail } from "./LinkSubRail.tsx";
-import { ImageSubRail } from "./ImageSubRail.tsx";
-import { CommonSubRail } from "./CommonSubRail.tsx";
-import { TodoSubRail } from "./TodoSubRail.tsx";
-import { BoardSubRail } from "./BoardSubRail.tsx";
-import { ConnectionSubRail } from "./ConnectionSubRail.tsx";
-import { EmbedSubRail } from "./EmbedSubRail.tsx";
-import { ColumnSubRail } from "./ColumnSubRail.tsx";
+import { type Tool } from "./layout/ToolRail.tsx";
+import { SelectionRail } from "./canvas/SelectionRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { type ActiveEditor } from "./EditableNote.tsx";
@@ -1771,14 +1763,6 @@ export function Canvas({
     },
   ];
 
-  const isNoteSelected =
-    selected && (selected.type === "note" || selected.type === "text");
-  const isLinkSelected = selected && selected.type === "link";
-  const isImageSelected = selected && selected.type === "image";
-  const isTodoSelected = selected && selected.type === "todo";
-  const isBoardSelected = selected && selected.type === "board";
-  const isEmbedSelected = selected && selected.type === "embed";
-  const isColumnSelected = selected && selected.type === "column";
   // Merge a hex into the selected element's style, or delete the key when null.
   const setStyleKey = (key: "fill" | "strip", hex: string | null) => {
     if (!selected) return;
@@ -1789,7 +1773,6 @@ export function Canvas({
   };
 
   // --- Multi-selection: common-settings rail applies one change across all selected elements. ---
-  const isMulti = selectedIds.length > 1;
   const selectedEls = elements.filter((e) => selectedIds.includes(e.id));
   const eachSelected = (fn: (e: Element) => Partial<Element> | null) => {
     const c = connRef.current;
@@ -1915,176 +1898,45 @@ export function Canvas({
     return child ? renderElementCard(child, true) : null;
   };
 
-  // ConnectionSubRail props for an edge (connection or standalone line). Both rails are identical
-  // bar their patch/remove fns and the arrow-end default (connections point by default, lines don't).
-  type Edge = { id: string; color?: string; arrowStart?: boolean; arrowEnd?: boolean; dashed?: boolean; weight?: number; label?: string };
-  const edgeRail = (
-    edge: Edge,
-    patchFn: (id: string, p: Record<string, unknown>) => void,
-    removeFn: (id: string) => void,
-    editLabel: (id: string) => void,
-    onDone: () => void,
-    endDefault: boolean,
-  ) => ({
-    conn: edge,
-    onDone,
-    onColor: (hex: string) => patchFn(edge.id, { color: hex }),
-    onToggleStart: () => patchFn(edge.id, { arrowStart: !(edge.arrowStart ?? false) }),
-    onToggleEnd: () => patchFn(edge.id, { arrowEnd: !(edge.arrowEnd ?? endDefault) }),
-    onLabel: () => editLabel(edge.id),
-    onToggleDashed: () => patchFn(edge.id, { dashed: !edge.dashed }),
-    onCycleWeight: () => { const w = edge.weight ?? 2; patchFn(edge.id, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 }); },
-    onDelete: () => removeFn(edge.id),
-  });
-
   return (
     <div className="flex flex-1 select-none overflow-hidden">
-      {readOnly ? (
-        <nav className="flex w-20 shrink-0 flex-col items-center gap-2 border-r-2 border-slate-100 bg-white py-3 text-center">
-          <Icon.EyeIcon className="text-xl text-slate-400" />
-          <span className="px-1 text-[10px] font-bold leading-tight text-slate-400">
-            View only
-          </span>
-        </nav>
-      ) : selectedConn && connections.find((c) => c.id === selectedConn) ? (
-        <ConnectionSubRail
-          {...edgeRail(
-            connections.find((c) => c.id === selectedConn)!,
-            patchConnection,
-            removeConnection,
-            setEditingConnLabel,
-            () => setSelectedConn(null),
-            true,
-          )}
-        />
-      ) : selectedLine && lines.find((l) => l.id === selectedLine) ? (
-        <ConnectionSubRail
-          {...edgeRail(
-            lines.find((l) => l.id === selectedLine)!,
-            patchLine,
-            removeLine,
-            setEditingLineLabel,
-            () => setSelectedLine(null),
-            false,
-          )}
-        />
-      ) : isMulti ? (
-        <CommonSubRail
-          els={selectedEls}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onFillAll={(hex) => setStyleAll("fill", hex)}
-          onStripAll={(hex) => setStyleAll("strip", hex)}
-          onToggleCaption={toggleCaptionAll}
-          onTogglePreview={togglePreviewAll}
-          onDelete={() => removeMany(selectedIds)}
-        />
-      ) : isNoteSelected ? (
-        <NoteSubRail
-          el={selected}
-          editing={editingId === selected.id}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onBack={() => setEditingId(null)}
-          onExec={exec}
-          onFill={(hex) => setStyleKey("fill", hex)}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isLinkSelected ? (
-        <LinkSubRail
-          el={selected}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onPatch={(p) => patch(selected.id, p as Partial<Element>)}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isImageSelected && captionEditing ? (
-        // Caption is focused → note-style text-formatting rail acting on the caption editor.
-        <NoteSubRail
-          el={selected}
-          editing
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onBack={() => {
-            setCaptionEditing(false);
-            editorRef.current?.el.blur();
-          }}
-          onExec={exec}
-          onFill={() => {}}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isImageSelected ? (
-        <ImageSubRail
-          el={selected}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onPatch={(p) => patch(selected.id, p as Partial<Element>)}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isTodoSelected ? (
-        <TodoSubRail
-          el={selected}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onFill={(hex) => setStyleKey("fill", hex)}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isBoardSelected ? (
-        <BoardSubRail
-          el={selected}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onOpen={() => onOpenBoard(selected.boardId)}
-          onFill={(hex) => setStyleKey("fill", hex)}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isEmbedSelected ? (
-        <EmbedSubRail
-          el={selected}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : isColumnSelected ? (
-        <ColumnSubRail
-          el={selected}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDone={deselect}
-          onToggleCollapse={() =>
-            patch(selected.id, {
-              collapsed: !selected.collapsed,
-            } as Partial<Element>)
-          }
-          onFill={(hex) => setStyleKey("fill", hex)}
-          onStrip={(hex) => setStyleKey("strip", hex)}
-          onDelete={() => selectedId && remove(selectedId)}
-        />
-      ) : (
-        <ToolRail
-          tools={createTools}
-          deleteRef={deleteRef}
-          deleteActive={overDelete}
-          onDelete={
-            selectedIds.length ? () => removeMany(selectedIds) : undefined
-          }
-        />
-      )}
+      <SelectionRail
+        readOnly={readOnly}
+        selected={selected}
+        connections={connections}
+        lines={lines}
+        selectedConn={selectedConn}
+        selectedLine={selectedLine}
+        selectedId={selectedId}
+        selectedIds={selectedIds}
+        selectedEls={selectedEls}
+        editingId={editingId}
+        captionEditing={captionEditing}
+        deleteRef={deleteRef}
+        overDelete={overDelete}
+        createTools={createTools}
+        editorRef={editorRef}
+        patch={patch}
+        patchConnection={patchConnection}
+        patchLine={patchLine}
+        remove={remove}
+        removeMany={removeMany}
+        removeConnection={removeConnection}
+        removeLine={removeLine}
+        setEditingConnLabel={setEditingConnLabel}
+        setEditingLineLabel={setEditingLineLabel}
+        setSelectedConn={setSelectedConn}
+        setSelectedLine={setSelectedLine}
+        setEditingId={setEditingId}
+        setCaptionEditing={setCaptionEditing}
+        exec={exec}
+        setStyleKey={setStyleKey}
+        setStyleAll={setStyleAll}
+        toggleCaptionAll={toggleCaptionAll}
+        togglePreviewAll={togglePreviewAll}
+        deselect={deselect}
+        onOpenBoard={onOpenBoard}
+      />
       <input
         ref={fileRef}
         type="file"
