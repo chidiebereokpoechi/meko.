@@ -4,7 +4,7 @@ import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
 import { api } from "../lib/api.ts";
-import { embedDefaultSize, embeddableUrl, extractIframeSrc, toEmbedUrl } from "../lib/embed.ts";
+import { embedDefaultSize, embedHeightFor, embeddableUrl, extractIframeSrc, faviconUrl } from "../lib/embed.ts";
 import type { AnchorKey, Board, Connection, Element, LineEndpoint, LineShape, TodoItem } from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
@@ -25,6 +25,8 @@ const WORLD_W = 4000;
 const WORLD_H = 3000;
 // Remembered choice for a dropped URL that could be an image or a link card (localStorage).
 const URL_CHOICE_KEY = "meko.urlDropChoice";
+// Remembered choice for an embeddable provider URL: "link" (with preview) or "embed".
+const EMBED_CHOICE_KEY = "meko.embedDropChoice";
 
 export interface BoardControls {
   undo: () => void;
@@ -69,6 +71,7 @@ export function Canvas({
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [justCreated, setJustCreated] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overDelete, setOverDelete] = useState(false);
   const [linkModal, setLinkModal] = useState<{ x: number; y: number } | null>(
@@ -88,6 +91,7 @@ export function Canvas({
   const [commentSignal, setCommentSignal] = useState(0);
   const [unreadComments, setUnreadComments] = useState(false);
   const [urlChoice, setUrlChoice] = useState<{ u: Unfurl; url: string; at: { x: number; y: number } } | null>(null);
+  const [embedChoice, setEmbedChoice] = useState<{ url: string; embed: string; at: { x: number; y: number } } | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -173,6 +177,12 @@ export function Canvas({
   const selectId = (id: string) => {
     setSelectedIds([id]);
     setSelectedConn(null);
+  };
+  // Select a just-created element so its first click drags/selects (doesn't jump into edit mode).
+  const selectNew = (id: string) => {
+    setSelectedIds([id]);
+    setSelectedConn(null);
+    setJustCreated(id);
   };
 
   // --- Connections (arrows between elements) ---
@@ -705,7 +715,7 @@ export function Canvas({
       text,
       style: { fill: "#ffffff" },
     });
-    selectId(id);
+    selectNew(id);
     setEditingId(null);
   };
 
@@ -724,7 +734,7 @@ export function Canvas({
       items: [{ id: crypto.randomUUID(), text: "", done: false }],
       style: { fill: "#ffffff" },
     });
-    selectId(id);
+    selectNew(id);
   };
 
   // Create a new board in this workspace and drop a tile that opens it (nested boards).
@@ -736,7 +746,7 @@ export function Canvas({
       const b = await api<Board>(`/api/workspaces/${workspaceId}/boards`, { method: "POST", body: JSON.stringify({ title, parentBoardId: boardId }) });
       const id = crypto.randomUUID();
       c.elements.set(id, { id, type: "board", x: at.x, y: at.y, w: 200, h: 116, boardId: b.id, title: b.title, style: { fill: "#ffffff" } });
-      selectId(id);
+      selectNew(id);
     } catch {
       toast("Couldn't create board", "error");
     }
@@ -749,14 +759,14 @@ export function Canvas({
     const id = crypto.randomUUID();
     const { w, h } = embedDefaultSize(src);
     c.elements.set(id, { id, type: "embed", x, y, w, h, src });
-    selectId(id);
+    selectNew(id);
   };
-  // Embed tool: accepts an <iframe> snippet, a provider URL, or any http(s) URL.
+  // Embed tool: raw embed code only — paste an <iframe …> snippet.
   const createEmbed = (input: string) => {
     const at = embedModal ?? viewportCentre();
-    const src = toEmbedUrl(input);
+    const src = extractIframeSrc(input);
     if (!src) {
-      toast("Can't embed that", "error");
+      toast("Paste embed code (an <iframe> snippet)", "error");
       return;
     }
     dropEmbed(src, at.x, at.y);
@@ -768,23 +778,26 @@ export function Canvas({
   };
 
   // Drop a link preview card from an already-fetched unfurl.
-  const dropLink = (u: Unfurl, url: string, at: { x: number; y: number }) => {
+  const dropLink = (u: Unfurl, url: string, at: { x: number; y: number }, embedSrc?: string) => {
     const c = connRef.current;
     if (!c) return;
     const id = crypto.randomUUID();
+    const w = embedSrc ? 360 : 260;
+    const previewH = embedSrc ? embedHeightFor(embedSrc, w) : u.imageUrl ? 230 : 0;
     c.elements.set(id, {
       id,
       type: "link",
       x: at.x,
       y: at.y,
-      w: 260,
-      h: u.imageUrl ? 230 : 96,
+      w,
+      h: previewH + 96,
       url: u.url || url,
       title: u.title ?? undefined,
       description: u.description ?? undefined,
       image: u.imageUrl ?? undefined,
+      embedSrc,
     });
-    selectId(id);
+    selectNew(id);
   };
 
   // Manual "Add link" dialog: always a link card (unfurled).
@@ -801,9 +814,16 @@ export function Canvas({
   // preview image the result is ambiguous (image vs link) — prompt, honouring a remembered choice.
   const handleUrl = async (url: string, x: number, y: number) => {
     if (isImageUrl(url)) return void createImageUrl(url, x, y);
-    // Known embeddable providers (YouTube, Vimeo, Figma, Spotify, …) drop straight in as embeds.
+    // Known embeddable providers (YouTube, Vimeo, Figma, Spotify, …): link-with-preview or a bare
+    // embed — prompt, honouring a remembered choice.
     const embed = embeddableUrl(url);
-    if (embed) return dropEmbed(embed, x, y);
+    if (embed) {
+      const remembered = localStorage.getItem(EMBED_CHOICE_KEY);
+      if (remembered === "embed") return dropEmbed(embed, x, y);
+      if (remembered === "link") return void createProviderLink(url, embed, { x, y });
+      setEmbedChoice({ url, embed, at: { x, y } });
+      return;
+    }
     const at = { x, y };
     let u: Unfurl;
     try {
@@ -828,6 +848,27 @@ export function Canvas({
     else dropLink(choice.u, choice.url, choice.at);
   };
 
+  // Provider link: unfurl for the title (track/video name), then a link card with the live embed
+  // as its preview. Falls back to a bare card if the unfurl fails.
+  const createProviderLink = async (url: string, embed: string, at: { x: number; y: number }) => {
+    let u: Unfurl = { url, title: null, description: null, imageUrl: null };
+    try {
+      u = await unfurlLink(boardId, url);
+    } catch {
+      /* keep fallback */
+    }
+    dropLink(u, url, at, embed);
+  };
+
+  const applyEmbedChoice = (kind: "link" | "embed", remember: boolean) => {
+    const choice = embedChoice;
+    setEmbedChoice(null);
+    if (!choice) return;
+    if (remember) localStorage.setItem(EMBED_CHOICE_KEY, kind);
+    if (kind === "embed") dropEmbed(choice.embed, choice.at.x, choice.at.y);
+    else void createProviderLink(choice.url, choice.embed, choice.at);
+  };
+
   const addImageFile = async (file: File, x: number, y: number) => {
     const c = connRef.current;
     if (!c) return;
@@ -839,7 +880,7 @@ export function Canvas({
       const id = crypto.randomUUID();
       const width = 280;
       c.elements.set(id, { id, type: "image", x, y, w: width, h: Math.max(40, Math.round((width * h) / w)), src: displayUrl, mediaId, alt: file.name });
-      selectId(id);
+      selectNew(id);
       toast("Image added", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Upload failed", "error");
@@ -867,7 +908,7 @@ export function Canvas({
       src,
       ...(caption ? { caption, showCaption: true } : {}),
     });
-    selectId(id);
+    selectNew(id);
   };
 
   const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1260,14 +1301,16 @@ export function Canvas({
 
       <NameModal
         open={!!embedModal}
-        title="Add an embed"
-        label="Paste a URL (YouTube, Vimeo, Figma, …)"
+        title="Embed code"
+        label="Paste an <iframe> embed snippet"
         submitLabel="Embed"
         onClose={() => setEmbedModal(null)}
         onSubmit={createEmbed}
       />
 
       {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
+
+      {embedChoice && <EmbedChoiceModal embed={embedChoice.embed} onPick={applyEmbedChoice} onClose={() => setEmbedChoice(null)} />}
 
       <div
         ref={viewportRef}
@@ -1386,6 +1429,8 @@ export function Canvas({
                 onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
                 onStartLink={(e) => startLink(el.id, e)}
                 onSize={reportHeight}
+                freshlyCreated={justCreated === el.id}
+                onConsumeFresh={() => setJustCreated(null)}
                 readOnly={readOnly}
                 onCaptionFocus={() => {
                   selectId(el.id);
@@ -1852,6 +1897,29 @@ function Handle({ pt, zoom, bend, onPointerDown, onDoubleClick }: { pt: Pt; zoom
 
 // Asks whether a dropped/pasted URL with a preview image should become an image or a link card,
 // with an option to remember the answer.
+// Asks whether an embeddable provider URL should be a link card (with a live preview) or a bare
+// embed, with an option to remember.
+function EmbedChoiceModal({ embed, onPick, onClose }: { embed: string; onPick: (kind: "link" | "embed", remember: boolean) => void; onClose: () => void }) {
+  const [remember, setRemember] = useState(false);
+  return (
+    <Modal open onClose={onClose} title="Link or embed?">
+      <iframe src={embed} title="preview" className="h-40 w-full rounded-lg border-2 border-slate-100" style={{ border: 0 }} sandbox="allow-scripts allow-same-origin allow-popups allow-presentation" />
+      <div className="flex gap-2">
+        <Button className="flex-1" onClick={() => onPick("link", remember)}>
+          <Icon.LinkIcon className="text-base" /> Link + preview
+        </Button>
+        <Button variant="ghost" className="flex-1 border-2 border-slate-200" onClick={() => onPick("embed", remember)}>
+          <Icon.EmbedIcon className="text-base" /> Embed
+        </Button>
+      </div>
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
+        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-2 border-slate-300 accent-primary" />
+        Remember my choice
+      </label>
+    </Modal>
+  );
+}
+
 function UrlChoiceModal({ preview, onPick, onClose }: { preview: Unfurl; onPick: (kind: "image" | "link", remember: boolean) => void; onClose: () => void }) {
   const [remember, setRemember] = useState(false);
   return (
@@ -2088,6 +2156,8 @@ function ElementCard({
   onTodo,
   onStartLink,
   onSize,
+  freshlyCreated,
+  onConsumeFresh,
   readOnly,
   shrink,
   dragging,
@@ -2112,6 +2182,8 @@ function ElementCard({
   onTodo?: (patch: { title?: string; items?: TodoItem[] }) => void;
   onStartLink?: (e: React.PointerEvent) => void;
   onSize?: (id: string, h: number) => void;
+  freshlyCreated?: boolean;
+  onConsumeFresh?: () => void;
   readOnly?: boolean;
   shrink: boolean;
   dragging: boolean;
@@ -2146,7 +2218,9 @@ function ElementCard({
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation(); // don't let the canvas deselect / pan
-    justSelected.current = !selected;
+    // A freshly-dropped element is already selected; treat the first press as a fresh select so it
+    // drags rather than entering edit mode.
+    justSelected.current = !selected || !!freshlyCreated;
     dragged.current = false;
     if (!selected) onSelect();
     if (!editing && !readOnly) {
@@ -2165,6 +2239,7 @@ function ElementCard({
   const onPointerUp = (e: React.PointerEvent) => {
     if (grab.current && dragged.current) onDragRelease(e.clientX, e.clientY);
     grab.current = null;
+    if (freshlyCreated) onConsumeFresh?.(); // subsequent clicks edit normally
   };
   // First click selects; a second click (already selected, no drag) enters edit mode.
   // Modifier-click (⌘/Ctrl/Alt) opens link elements.
@@ -2281,14 +2356,28 @@ function ElementCard({
               style={{ background: el.style.strip }}
             />
           )}
-          {el.image && !el.hideImage && (
-            <img
-              src={el.image}
-              alt=""
-              className="w-full object-cover"
-              style={{ height: Math.round(el.w * 0.52) }}
-              draggable={false}
-            />
+          {el.embedSrc ? (
+            <div className="relative w-full" style={{ height: embedHeightFor(el.embedSrc, el.w) }}>
+              <iframe
+                src={el.embedSrc}
+                title="embed"
+                className="h-full w-full"
+                style={{ border: 0, pointerEvents: selected && !readOnly && !freshlyCreated ? "auto" : "none" }}
+                sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
+                allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
+              />
+              {!(selected && !readOnly && !freshlyCreated) && <div className="absolute inset-0" />}
+            </div>
+          ) : (
+            el.image && !el.hideImage && (
+              <img
+                src={el.image}
+                alt=""
+                className="w-full object-cover"
+                style={{ height: Math.round(el.w * 0.52) }}
+                draggable={false}
+              />
+            )
           )}
           <div className="shrink-0 p-2">
             {/* Heading is a real link; stopPropagation so clicking it opens (not drag/select). */}
@@ -2306,8 +2395,9 @@ function ElementCard({
                 {el.description}
               </div>
             )}
-            <div className="mt-1 truncate text-[10px] text-slate-400">
-              {linkHost(el.url)}
+            <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+              {faviconUrl(el.url) && <img src={faviconUrl(el.url)!} alt="" width={12} height={12} className="shrink-0 rounded-sm" draggable={false} />}
+              <span className="truncate">{linkHost(el.url)}</span>
             </div>
           </div>
         </div>
@@ -2332,12 +2422,13 @@ function ElementCard({
             src={el.src}
             title="embed"
             className="min-h-0 w-full flex-1"
-            style={{ border: 0, pointerEvents: selected && !readOnly ? "auto" : "none" }}
+            style={{ border: 0, pointerEvents: selected && !readOnly && !freshlyCreated ? "auto" : "none" }}
             sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
             allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
           />
-          {/* When not selected, swallow pointer events so the card can be dragged/selected. */}
-          {!(selected && !readOnly) && <div className="absolute inset-0" />}
+          {/* Swallow pointer events unless interactive, so the card can be dragged/selected
+              (including right after it's dropped). */}
+          {!(selected && !readOnly && !freshlyCreated) && <div className="absolute inset-0" />}
         </div>
       ) : (
         <div className="grid h-full place-items-center text-slate-400">

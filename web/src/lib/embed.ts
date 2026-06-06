@@ -95,3 +95,19 @@ export function embedHost(src: string): string {
     return src;
   }
 }
+
+// Preview height for an embed shown inside a link card at the given width (keeps native ratio).
+export function embedHeightFor(src: string, w: number): number {
+  const d = embedDefaultSize(src);
+  return Math.round((d.h * w) / d.w);
+}
+
+// Favicon for a URL via Google's favicon service (no extra request to the target site).
+export function faviconUrl(url: string): string | null {
+  try {
+    const host = new URL(url).hostname;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`;
+  } catch {
+    return null;
+  }
+}

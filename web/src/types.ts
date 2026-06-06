@@ -27,7 +27,7 @@ export type Element =
   | (Base & { type: "note"; text: string })
   | (Base & { type: "text"; text: string })
   | (Base & { type: "image"; src: string; alt?: string; mediaId?: string; caption?: string; showCaption?: boolean })
-  | (Base & { type: "link"; url: string; title?: string; description?: string; image?: string; hideImage?: boolean; hideCaption?: boolean })
+  | (Base & { type: "link"; url: string; title?: string; description?: string; image?: string; embedSrc?: string; hideImage?: boolean; hideCaption?: boolean })
   | (Base & { type: "file"; name: string; downloadUrl: string; size: number })
   | (Base & { type: "embed"; src: string })
   | (Base & { type: "todo"; title?: string; items: TodoItem[] })

@@ -59,6 +59,8 @@ export const LinkElement = z
     description: z.string().max(2000).optional(),
     // Unfurl preview image (remote OG image URL); http(s)-only.
     image: SafeUrl.optional(),
+    // Live embed iframe src (provider links rendered with a player as their preview); http(s)-only.
+    embedSrc: SafeUrl.optional(),
     // Per-card toggles (absent = shown).
     hideImage: z.boolean().optional(),
     hideCaption: z.boolean().optional(),
