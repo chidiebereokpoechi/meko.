@@ -2407,7 +2407,7 @@ export function Canvas({
         <div className="h-full w-full">
           <div
             ref={surfaceRef}
-            className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)]" : ""}`}
+            className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#b4bccb_1px,transparent_1px)]" : ""}`}
             style={{
               width: WORLD_W,
               height: WORLD_H,
@@ -3812,7 +3812,7 @@ function ElementCard({
   const s = el.style ?? {};
   // lineHeight is unitless so it scales with fontSize (otherwise large text overlaps).
   const textStyle: CSSProperties = {
-    color: s.color ?? "#1f2937",
+    color: s.color ?? "#0f172a",
     fontWeight: s.fontWeight ?? "normal",
     fontSize: s.fontSize ?? 14,
     lineHeight: 1.35,
@@ -3833,7 +3833,7 @@ function ElementCard({
       onContextMenu={onContextMenu}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
-      className={`${embedded ? "relative w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
+      className={`${embedded ? "relative w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-400"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
       style={{
         left: embedded ? undefined : el.x,
         top: embedded ? undefined : el.y,
