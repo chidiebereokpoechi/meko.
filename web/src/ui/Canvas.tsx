@@ -56,6 +56,7 @@ import {
 import { EmbedChoiceModal, UrlChoiceModal } from "./canvas/ChoiceModals.tsx";
 import { ElementCard } from "./canvas/ElementCard.tsx";
 import { useViewport } from "./canvas/useViewport.ts";
+import { TOOL_SPECS } from "./canvas/tools.ts";
 
 export interface BoardControls {
   undo: () => void;
@@ -1202,68 +1203,16 @@ export function Canvas({
     if (readOnly) return;
     const c = connRef.current;
     if (!c) return;
+    const spec = TOOL_SPECS[toolKey];
+    if (!spec) return;
     const id = crypto.randomUUID();
     const w0 = toWorld(e.clientX, e.clientY);
-    let size = { w: 220, h: 120 };
-    let fill: "image" | "link" | "embed" | "board" | null = null;
-    const base = (w: number, h: number) => {
-      size = { w, h };
-      return { id, x: w0.x - w / 2, y: w0.y - h / 2, w, h };
-    };
-    switch (toolKey) {
-      case "note":
-        c.elements.set(id, {
-          ...base(220, 120),
-          type: "note",
-          text: "",
-          style: { fill: "#ffffff" },
-        });
-        break;
-      case "todo":
-        c.elements.set(id, {
-          ...base(240, 140),
-          type: "todo",
-          title: "",
-          items: [{ id: crypto.randomUUID(), text: "", done: false }],
-          style: { fill: "#ffffff" },
-        });
-        break;
-      case "column":
-        c.elements.set(id, {
-          ...base(280, 120),
-          type: "column",
-          title: "",
-          children: [],
-          style: { fill: "#ffffff" },
-        });
-        break;
-      case "image":
-        c.elements.set(id, { ...base(280, 180), type: "image", src: "" });
-        fill = "image";
-        break;
-      case "link":
-        c.elements.set(id, { ...base(260, 96), type: "link", url: "" });
-        fill = "link";
-        break;
-      case "embed":
-        c.elements.set(id, { ...base(360, 203), type: "embed", src: "" });
-        fill = "embed";
-        break;
-      case "board":
-        c.elements.set(id, {
-          ...base(200, 116),
-          type: "board",
-          boardId: "",
-          title: "",
-        });
-        fill = "board";
-        break;
-      default:
-        return;
-    }
+    const size = { w: spec.w, h: spec.h };
+    const fill = spec.fill ?? null;
+    c.elements.set(id, spec.make({ id, x: w0.x - spec.w / 2, y: w0.y - spec.h / 2, w: spec.w, h: spec.h }));
     selectNew(id);
     setDraggingId(id);
-    const intoColumn = toolKey !== "column"; // columns can't nest
+    const intoColumn = !!spec.nestable; // columns can't nest
     const move = (ev: PointerEvent) => {
       const w = toWorld(ev.clientX, ev.clientY);
       patch(id, { x: w.x - size.w / 2, y: w.y - size.h / 2 });
@@ -1966,6 +1915,28 @@ export function Canvas({
     return child ? renderElementCard(child, true) : null;
   };
 
+  // ConnectionSubRail props for an edge (connection or standalone line). Both rails are identical
+  // bar their patch/remove fns and the arrow-end default (connections point by default, lines don't).
+  type Edge = { id: string; color?: string; arrowStart?: boolean; arrowEnd?: boolean; dashed?: boolean; weight?: number; label?: string };
+  const edgeRail = (
+    edge: Edge,
+    patchFn: (id: string, p: Record<string, unknown>) => void,
+    removeFn: (id: string) => void,
+    editLabel: (id: string) => void,
+    onDone: () => void,
+    endDefault: boolean,
+  ) => ({
+    conn: edge,
+    onDone,
+    onColor: (hex: string) => patchFn(edge.id, { color: hex }),
+    onToggleStart: () => patchFn(edge.id, { arrowStart: !(edge.arrowStart ?? false) }),
+    onToggleEnd: () => patchFn(edge.id, { arrowEnd: !(edge.arrowEnd ?? endDefault) }),
+    onLabel: () => editLabel(edge.id),
+    onToggleDashed: () => patchFn(edge.id, { dashed: !edge.dashed }),
+    onCycleWeight: () => { const w = edge.weight ?? 2; patchFn(edge.id, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 }); },
+    onDelete: () => removeFn(edge.id),
+  });
+
   return (
     <div className="flex flex-1 select-none overflow-hidden">
       {readOnly ? (
@@ -1977,67 +1948,25 @@ export function Canvas({
         </nav>
       ) : selectedConn && connections.find((c) => c.id === selectedConn) ? (
         <ConnectionSubRail
-          conn={connections.find((c) => c.id === selectedConn)!}
-          onDone={() => setSelectedConn(null)}
-          onColor={(hex: string) =>
-            patchConnection(selectedConn, { color: hex })
-          }
-          onToggleStart={() =>
-            patchConnection(selectedConn, {
-              arrowStart: !(
-                connections.find((c) => c.id === selectedConn)!.arrowStart ??
-                false
-              ),
-            })
-          }
-          onToggleEnd={() =>
-            patchConnection(selectedConn, {
-              arrowEnd: !(
-                connections.find((c) => c.id === selectedConn)!.arrowEnd ?? true
-              ),
-            })
-          }
-          onLabel={() => setEditingConnLabel(selectedConn)}
-          onToggleDashed={() =>
-            patchConnection(selectedConn, {
-              dashed: !connections.find((c) => c.id === selectedConn)!.dashed,
-            })
-          }
-          onCycleWeight={() => {
-            const w =
-              connections.find((c) => c.id === selectedConn)!.weight ?? 2;
-            patchConnection(selectedConn, {
-              weight: w === 2 ? 4 : w === 4 ? 6 : 2,
-            });
-          }}
-          onDelete={() => removeConnection(selectedConn)}
+          {...edgeRail(
+            connections.find((c) => c.id === selectedConn)!,
+            patchConnection,
+            removeConnection,
+            setEditingConnLabel,
+            () => setSelectedConn(null),
+            true,
+          )}
         />
       ) : selectedLine && lines.find((l) => l.id === selectedLine) ? (
         <ConnectionSubRail
-          conn={lines.find((l) => l.id === selectedLine)!}
-          onDone={() => setSelectedLine(null)}
-          onColor={(hex: string) => patchLine(selectedLine, { color: hex })}
-          onToggleStart={() =>
-            patchLine(selectedLine, {
-              arrowStart: !lines.find((l) => l.id === selectedLine)!.arrowStart,
-            })
-          }
-          onToggleEnd={() =>
-            patchLine(selectedLine, {
-              arrowEnd: !lines.find((l) => l.id === selectedLine)!.arrowEnd,
-            })
-          }
-          onLabel={() => setEditingLineLabel(selectedLine)}
-          onToggleDashed={() =>
-            patchLine(selectedLine, {
-              dashed: !lines.find((l) => l.id === selectedLine)!.dashed,
-            })
-          }
-          onCycleWeight={() => {
-            const w = lines.find((l) => l.id === selectedLine)!.weight ?? 2;
-            patchLine(selectedLine, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 });
-          }}
-          onDelete={() => removeLine(selectedLine)}
+          {...edgeRail(
+            lines.find((l) => l.id === selectedLine)!,
+            patchLine,
+            removeLine,
+            setEditingLineLabel,
+            () => setSelectedLine(null),
+            false,
+          )}
         />
       ) : isMulti ? (
         <CommonSubRail
