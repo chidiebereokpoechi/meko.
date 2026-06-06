@@ -4,6 +4,7 @@ import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
 import { api } from "../lib/api.ts";
+import { embedDefaultSize, embeddableUrl, extractIframeSrc, toEmbedUrl } from "../lib/embed.ts";
 import type { AnchorKey, Board, Connection, Element, LineEndpoint, LineShape, TodoItem } from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
@@ -14,6 +15,7 @@ import { CommonSubRail } from "./CommonSubRail.tsx";
 import { TodoSubRail } from "./TodoSubRail.tsx";
 import { BoardSubRail } from "./BoardSubRail.tsx";
 import { ConnectionSubRail } from "./ConnectionSubRail.tsx";
+import { EmbedSubRail } from "./EmbedSubRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { EditableNote, type ActiveEditor } from "./EditableNote.tsx";
@@ -73,6 +75,7 @@ export function Canvas({
     null,
   );
   const [boardModal, setBoardModal] = useState<{ x: number; y: number } | null>(null);
+  const [embedModal, setEmbedModal] = useState<{ x: number; y: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   // Marquee selection rectangle in screen coords while dragging empty canvas.
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -739,6 +742,26 @@ export function Canvas({
     }
   };
 
+  // Drop an embed element with a resolved iframe src.
+  const dropEmbed = (src: string, x: number, y: number) => {
+    const c = connRef.current;
+    if (!c) return;
+    const id = crypto.randomUUID();
+    const { w, h } = embedDefaultSize(src);
+    c.elements.set(id, { id, type: "embed", x, y, w, h, src });
+    selectId(id);
+  };
+  // Embed tool: accepts an <iframe> snippet, a provider URL, or any http(s) URL.
+  const createEmbed = (input: string) => {
+    const at = embedModal ?? viewportCentre();
+    const src = toEmbedUrl(input);
+    if (!src) {
+      toast("Can't embed that", "error");
+      return;
+    }
+    dropEmbed(src, at.x, at.y);
+  };
+
   const pickImageAt = (x: number, y: number) => {
     dropCoords.current = { x, y };
     fileRef.current?.click();
@@ -778,6 +801,9 @@ export function Canvas({
   // preview image the result is ambiguous (image vs link) — prompt, honouring a remembered choice.
   const handleUrl = async (url: string, x: number, y: number) => {
     if (isImageUrl(url)) return void createImageUrl(url, x, y);
+    // Known embeddable providers (YouTube, Vimeo, Figma, Spotify, …) drop straight in as embeds.
+    const embed = embeddableUrl(url);
+    if (embed) return dropEmbed(embed, x, y);
     const at = { x, y };
     let u: Unfurl;
     try {
@@ -880,6 +906,7 @@ export function Canvas({
       else if (tool === "link") setLinkModal({ x, y });
       else if (tool === "todo") createTodo(x, y);
       else if (tool === "board") setBoardModal({ x, y });
+      else if (tool === "embed") setEmbedModal({ x, y });
       else if (tool === "line") {
         const c = connRef.current;
         if (c) {
@@ -906,6 +933,8 @@ export function Canvas({
       e.dataTransfer.getData("text/plain")
     ).trim();
     if (!uri) return;
+    const iframeSrc = extractIframeSrc(uri);
+    if (iframeSrc) return dropEmbed(iframeSrc, x, y);
     const first = uri.split(/\s+/)[0]!;
     if (/^https?:\/\//i.test(first)) void handleUrl(first, x, y);
     else createNote(x, y, uri.slice(0, 10000));
@@ -939,6 +968,12 @@ export function Canvas({
       }
       const text = dt.getData("text").trim();
       if (!text) return;
+      const iframeSrc = extractIframeSrc(text);
+      if (iframeSrc) {
+        dropEmbed(iframeSrc, x, y);
+        e.preventDefault();
+        return;
+      }
       const first = text.split(/\s+/)[0]!;
       if (/^https?:\/\//i.test(first)) void handleUrl(first, x, y);
       else createNote(x, y, text.slice(0, 10000));
@@ -986,6 +1021,13 @@ export function Canvas({
       onPlace: () => setBoardModal(viewportCentre()),
     },
     {
+      key: "embed",
+      label: "Embed",
+      icon: <Icon.EmbedIcon />,
+      dragKey: "embed",
+      onPlace: () => setEmbedModal(viewportCentre()),
+    },
+    {
       key: "line",
       label: "Line",
       icon: <Icon.LineIcon />,
@@ -1005,6 +1047,7 @@ export function Canvas({
   const isImageSelected = selected && selected.type === "image";
   const isTodoSelected = selected && selected.type === "todo";
   const isBoardSelected = selected && selected.type === "board";
+  const isEmbedSelected = selected && selected.type === "embed";
   // Merge a hex into the selected element's style, or delete the key when null.
   const setStyleKey = (key: "fill" | "strip", hex: string | null) => {
     if (!selected) return;
@@ -1173,6 +1216,15 @@ export function Canvas({
           onStrip={(hex) => setStyleKey("strip", hex)}
           onDelete={() => selectedId && remove(selectedId)}
         />
+      ) : isEmbedSelected ? (
+        <EmbedSubRail
+          el={selected}
+          deleteRef={deleteRef}
+          deleteActive={overDelete}
+          onDone={deselect}
+          onStrip={(hex) => setStyleKey("strip", hex)}
+          onDelete={() => selectedId && remove(selectedId)}
+        />
       ) : (
         <ToolRail
           tools={createTools}
@@ -1206,6 +1258,14 @@ export function Canvas({
         onSubmit={createBoardElement}
       />
 
+      <NameModal
+        open={!!embedModal}
+        title="Add an embed"
+        label="Paste a URL (YouTube, Vimeo, Figma, …)"
+        submitLabel="Embed"
+        onClose={() => setEmbedModal(null)}
+        onSubmit={createEmbed}
+      />
 
       {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
 
@@ -2264,6 +2324,20 @@ function ElementCard({
             <span className="line-clamp-2 text-xs font-bold text-slate-700">{el.title || "Board"}</span>
             <span className="text-[10px] font-bold text-slate-400">Double-click to open</span>
           </div>
+        </div>
+      ) : el.type === "embed" ? (
+        <div className="relative flex h-full w-full flex-col overflow-hidden">
+          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+          <iframe
+            src={el.src}
+            title="embed"
+            className="min-h-0 w-full flex-1"
+            style={{ border: 0, pointerEvents: selected && !readOnly ? "auto" : "none" }}
+            sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
+            allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
+          />
+          {/* When not selected, swallow pointer events so the card can be dragged/selected. */}
+          {!(selected && !readOnly) && <div className="absolute inset-0" />}
         </div>
       ) : (
         <div className="grid h-full place-items-center text-slate-400">

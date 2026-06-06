@@ -40,5 +40,6 @@ export const ArrowRightIcon = svg(<path d="M5 12h14m0 0-6-6m6 6-6 6" />);
 export const DashIcon = svg(<path d="M4 18 20 6" strokeDasharray="4 3" />);
 export const WeightIcon = svg(<path d="M5 7h14M5 12h14M5 17h14" />);
 export const LineIcon = svg(<><path d="M5 19 19 5" /><circle cx="5" cy="19" r="2.2" fill="currentColor" /><circle cx="19" cy="5" r="2.2" fill="currentColor" /></>);
+export const EmbedIcon = svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none" /></>);
 export const BoardIcon = svg(<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 9v12" /></>);
 
