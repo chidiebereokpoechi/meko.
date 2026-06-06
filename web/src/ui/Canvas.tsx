@@ -1,11 +1,31 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { uploadImage, resolveMedia } from "../lib/media.ts";
 import { requestExport } from "../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../lib/links.ts";
 import { api } from "../lib/api.ts";
-import { embedDefaultSize, embedHeightFor, embeddableUrl, extractIframeSrc, faviconUrl } from "../lib/embed.ts";
-import type { AnchorKey, Board, Connection, Element, LineEndpoint, LineShape, TodoItem } from "../types.ts";
+import {
+  embedDefaultSize,
+  embedHeightFor,
+  embeddableUrl,
+  extractIframeSrc,
+  faviconUrl,
+} from "../lib/embed.ts";
+import type {
+  AnchorKey,
+  Board,
+  Connection,
+  Element,
+  LineEndpoint,
+  LineShape,
+  TodoItem,
+} from "../types.ts";
 import { Badge, Button, Icon, Modal, toast } from "./kit/index.ts";
 import { ToolRail, type Tool } from "./layout/ToolRail.tsx";
 import { NoteSubRail } from "./NoteSubRail.tsx";
@@ -62,10 +82,18 @@ export function Canvas({
   const deleteRef = useRef<HTMLDivElement>(null);
   const dropCoords = useRef<{ x: number; y: number } | null>(null);
   // When set, the next image/link/embed/board dialog fills this placeholder instead of creating new.
-  const fillRef = useRef<{ id: string; kind: "image" | "link" | "embed" | "board" } | null>(null);
+  const fillRef = useRef<{
+    id: string;
+    kind: "image" | "link" | "embed" | "board";
+  } | null>(null);
   const editorRef = useRef<ActiveEditor | null>(null);
   const savedRange = useRef<Range | null>(null);
-  const panRef = useRef<{ cx: number; cy: number; px: number; py: number } | null>(null);
+  const panRef = useRef<{
+    cx: number;
+    cy: number;
+    px: number;
+    py: number;
+  } | null>(null);
   const [, setTick] = useState(0);
   // Pan offset (screen px) + zoom applied to the world via CSS transform.
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
@@ -80,12 +108,25 @@ export function Canvas({
   const [linkModal, setLinkModal] = useState<{ x: number; y: number } | null>(
     null,
   );
-  const [boardModal, setBoardModal] = useState<{ x: number; y: number } | null>(null);
-  const [embedModal, setEmbedModal] = useState<{ x: number; y: number } | null>(null);
+  const [boardModal, setBoardModal] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const [embedModal, setEmbedModal] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const [dragOver, setDragOver] = useState(false);
   // Marquee selection rectangle in screen coords while dragging empty canvas.
-  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean } | null>(null);
+  const [marquee, setMarquee] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const marqueeRef = useRef<{
+    x0: number;
+    y0: number;
+    additive: boolean;
+  } | null>(null);
   const spaceRef = useRef(false); // space held → drag pans instead of marquees
   const [captionEditing, setCaptionEditing] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
@@ -93,8 +134,16 @@ export function Canvas({
   const showCommentsRef = useRef(false);
   const [commentSignal, setCommentSignal] = useState(0);
   const [unreadComments, setUnreadComments] = useState(false);
-  const [urlChoice, setUrlChoice] = useState<{ u: Unfurl; url: string; at: { x: number; y: number } } | null>(null);
-  const [embedChoice, setEmbedChoice] = useState<{ url: string; embed: string; at: { x: number; y: number } } | null>(null);
+  const [urlChoice, setUrlChoice] = useState<{
+    u: Unfurl;
+    url: string;
+    at: { x: number; y: number };
+  } | null>(null);
+  const [embedChoice, setEmbedChoice] = useState<{
+    url: string;
+    embed: string;
+    at: { x: number; y: number };
+  } | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -112,15 +161,35 @@ export function Canvas({
   const [selectedConn, setSelectedConn] = useState<string | null>(null);
   // Inline label editing + live endpoint reassignment for the selected connection.
   const [editingConnLabel, setEditingConnLabel] = useState<string | null>(null);
-  const [connDrag, setConnDrag] = useState<{ id: string; which: "from" | "to"; pos: { x: number; y: number } } | null>(null);
+  const [connDrag, setConnDrag] = useState<{
+    id: string;
+    which: "from" | "to";
+    pos: { x: number; y: number };
+  } | null>(null);
   // Standalone line tool: arm (tool clicked), in-progress draw, selection, endpoint drag, label.
   const [armLine, setArmLine] = useState(false);
-  const [lineDraw, setLineDraw] = useState<{ a: LineEndpoint; b: LineEndpoint } | null>(null);
+  const [lineDraw, setLineDraw] = useState<{
+    a: LineEndpoint;
+    b: LineEndpoint;
+  } | null>(null);
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
-  const [lineDrag, setLineDrag] = useState<{ id: string; which: "a" | "b"; ep: LineEndpoint } | null>(null);
+  const [lineDrag, setLineDrag] = useState<{
+    id: string;
+    which: "a" | "b";
+    ep: LineEndpoint;
+  } | null>(null);
   const [editingLineLabel, setEditingLineLabel] = useState<string | null>(null);
   // Live column drop target (highlight + insertion index) while dragging a card.
-  const [colDrop, setColDrop] = useState<{ colId: string; index: number } | null>(null);
+  const [colDrop, setColDrop] = useState<{
+    colId: string;
+    index: number;
+  } | null>(null);
+  // Floating preview of a column child detached under the cursor while dragging it out.
+  const [childDragGhost, setChildDragGhost] = useState<{
+    id: string;
+    cx: number;
+    cy: number;
+  } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -168,19 +237,30 @@ export function Canvas({
   // Map a child element id → the column containing it (children are flat in the map; columns
   // reference them by id and render them inline). Top-level = everything not inside a column.
   const childToCol = new Map<string, string>();
-  for (const e of elements) if (e.type === "column") for (const cid of e.children) childToCol.set(cid, e.id);
+  for (const e of elements)
+    if (e.type === "column")
+      for (const cid of e.children) childToCol.set(cid, e.id);
   const topElements = elements.filter((e) => !childToCol.has(e.id));
   const connections: Connection[] = connRef.current
     ? Array.from(connRef.current.connections.values())
     : [];
   // Auto-height elements (todo/link/image) don't keep el.h in sync with their rendered height, so
   // connection endpoints would miss. Use measured heights for connection geometry.
-  const sizedElements = elements.map((e) => ({ ...e, h: cardHeights[e.id] ?? e.h }));
+  const sizedElements = elements.map((e) => ({
+    ...e,
+    h: cardHeights[e.id] ?? e.h,
+  }));
   const connLines = computeLines(sizedElements, connections, connDrag);
-  const lines: LineShape[] = connRef.current ? Array.from(connRef.current.lines.values()) : [];
+  const lines: LineShape[] = connRef.current
+    ? Array.from(connRef.current.lines.values())
+    : [];
   const lineGeo = computeLineGeo(lines, sizedElements, lineDrag);
   // Snap indicator ring while drawing or dragging an endpoint onto an element anchor.
-  const snapPt = lineDraw?.b.elementId ? { x: lineDraw.b.x, y: lineDraw.b.y } : lineDrag?.ep.elementId ? { x: lineDrag.ep.x, y: lineDrag.ep.y } : null;
+  const snapPt = lineDraw?.b.elementId
+    ? { x: lineDraw.b.x, y: lineDraw.b.y }
+    : lineDrag?.ep.elementId
+      ? { x: lineDrag.ep.x, y: lineDrag.ep.y }
+      : null;
   // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
   // select many.
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
@@ -191,7 +271,9 @@ export function Canvas({
   };
   // Cmd/Ctrl-click toggles an element in/out of a multi-selection.
   const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
     setSelectedConn(null);
     setSelectedLine(null);
     setEditingId(null);
@@ -208,7 +290,12 @@ export function Canvas({
     const c = connRef.current;
     if (!c || from === to) return;
     // Avoid duplicate arrows in the same direction.
-    if (Array.from(c.connections.values()).some((cn) => cn.from === from && cn.to === to)) return;
+    if (
+      Array.from(c.connections.values()).some(
+        (cn) => cn.from === from && cn.to === to,
+      )
+    )
+      return;
     const id = crypto.randomUUID();
     c.connections.set(id, { id, from, to, arrowEnd: true });
   };
@@ -237,7 +324,8 @@ export function Canvas({
     connRef.current?.lines.delete(id);
     setSelectedLine((s) => (s === id ? null : s));
   };
-  const setLineLabel = (id: string, label: string) => patchLine(id, { label: label || undefined });
+  const setLineLabel = (id: string, label: string) =>
+    patchLine(id, { label: label || undefined });
 
   useEffect(() => {
     for (const el of elements) {
@@ -327,13 +415,27 @@ export function Canvas({
     return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   };
   // Column under a screen point + the child index a drop there would land at (via the live DOM).
-  const columnDropAt = (clientX: number, clientY: number, excludeId?: string): { colId: string; index: number } | null => {
-    for (const node of Array.from(document.querySelectorAll<HTMLElement>("[data-column-id]"))) {
+  const columnDropAt = (
+    clientX: number,
+    clientY: number,
+    excludeId?: string,
+  ): { colId: string; index: number } | null => {
+    for (const node of Array.from(
+      document.querySelectorAll<HTMLElement>("[data-column-id]"),
+    )) {
       const colId = node.getAttribute("data-column-id")!;
       if (colId === excludeId) continue;
       const r = node.getBoundingClientRect();
-      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
-      const kids = Array.from(node.querySelectorAll<HTMLElement>("[data-col-child]"));
+      if (
+        clientX < r.left ||
+        clientX > r.right ||
+        clientY < r.top ||
+        clientY > r.bottom
+      )
+        continue;
+      const kids = Array.from(
+        node.querySelectorAll<HTMLElement>("[data-col-child]"),
+      );
       let index = kids.length;
       for (let i = 0; i < kids.length; i++) {
         const kr = kids[i]!.getBoundingClientRect();
@@ -350,19 +452,26 @@ export function Canvas({
     setDraggingId(id);
     setOverDelete(overDeleteZone(x, y));
     // A non-column element dragged over a column previews where it'd drop.
-    setColDrop(elementsById.get(id)?.type === "column" ? null : columnDropAt(x, y, id));
+    setColDrop(
+      elementsById.get(id)?.type === "column" ? null : columnDropAt(x, y, id),
+    );
   };
   // Drop over Delete removes; over a column reparents; otherwise just ends the drag. Operates on the
   // whole selection when the dragged element is part of a multi-selection.
   const handleDragRelease = (id: string, x: number, y: number) => {
-    const targets = selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
+    const targets =
+      selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
     if (overDeleteZone(x, y)) {
       removeMany(targets);
     } else {
       const drop = columnDropAt(x, y, id);
       if (drop) {
-        const movables = targets.filter((t) => elementsById.get(t)?.type !== "column");
-        movables.forEach((t, i) => moveChildToColumn(t, drop.colId, drop.index + i));
+        const movables = targets.filter(
+          (t) => elementsById.get(t)?.type !== "column",
+        );
+        movables.forEach((t, i) =>
+          moveChildToColumn(t, drop.colId, drop.index + i),
+        );
       }
     }
     setDraggingId(null);
@@ -462,17 +571,34 @@ export function Canvas({
   const toWorld = (clientX: number, clientY: number) => {
     const r = surfaceRef.current?.getBoundingClientRect();
     if (!r) return { x: 0, y: 0 };
-    return { x: (clientX - r.left) / view.zoom, y: (clientY - r.top) / view.zoom };
+    return {
+      x: (clientX - r.left) / view.zoom,
+      y: (clientY - r.top) / view.zoom,
+    };
   };
 
   // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
   // to whatever element sits under the cursor.
   // A valid drop target: topmost element under the point that isn't the source and isn't already
   // connected from the source in that direction.
-  const linkTargetAt = (w: { x: number; y: number }, from: string): string | null => {
-    const el = [...sizedElements].reverse().find((e) => e.id !== from && w.x >= e.x && w.x <= e.x + e.w && w.y >= e.y && w.y <= e.y + e.h);
+  const linkTargetAt = (
+    w: { x: number; y: number },
+    from: string,
+  ): string | null => {
+    const el = [...sizedElements]
+      .reverse()
+      .find(
+        (e) =>
+          e.id !== from &&
+          w.x >= e.x &&
+          w.x <= e.x + e.w &&
+          w.y >= e.y &&
+          w.y <= e.y + e.h,
+      );
     if (!el) return null;
-    const dup = Array.from(connRef.current?.connections.values() ?? []).some((cn) => cn.from === from && cn.to === el.id);
+    const dup = Array.from(connRef.current?.connections.values() ?? []).some(
+      (cn) => cn.from === from && cn.to === el.id,
+    );
     return dup ? null : el.id;
   };
   const startLink = (from: string, e: React.PointerEvent) => {
@@ -505,23 +631,35 @@ export function Canvas({
     e.stopPropagation();
     let moved = false;
     const move = (ev: PointerEvent) => {
-      if (!moved && Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) < 4) return;
+      if (
+        !moved &&
+        Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) < 4
+      )
+        return;
       moved = true;
       setDraggingId(childId);
       setColDrop(columnDropAt(ev.clientX, ev.clientY));
+      setChildDragGhost({ id: childId, cx: ev.clientX, cy: ev.clientY });
     };
     const up = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDraggingId(null);
       setColDrop(null);
+      setChildDragGhost(null);
       if (!moved) {
         selectId(childId);
         return;
       }
-      const targets = selectedIds.includes(childId) && selectedIds.length > 1 ? selectedIds.filter((tid) => childToCol.has(tid)) : [childId];
+      const targets =
+        selectedIds.includes(childId) && selectedIds.length > 1
+          ? selectedIds.filter((tid) => childToCol.has(tid))
+          : [childId];
       const drop = columnDropAt(ev.clientX, ev.clientY);
-      if (drop) targets.forEach((t, i) => moveChildToColumn(t, drop.colId, drop.index + i));
+      if (drop)
+        targets.forEach((t, i) =>
+          moveChildToColumn(t, drop.colId, drop.index + i),
+        );
       else {
         const w = toWorld(ev.clientX, ev.clientY);
         targets.forEach((t, i) => extractChild(t, w.x, w.y + i * 24));
@@ -533,17 +671,30 @@ export function Canvas({
 
   // Drag a selected connection's endpoint to re-anchor it: the endpoint follows the cursor, and on
   // release it reassigns to whatever element is under the pointer (must differ from the other end).
-  const startEndpointDrag = (id: string, which: "from" | "to", e: React.PointerEvent) => {
+  const startEndpointDrag = (
+    id: string,
+    which: "from" | "to",
+    e: React.PointerEvent,
+  ) => {
     if (readOnly) return;
     e.stopPropagation();
     setConnDrag({ id, which, pos: toWorld(e.clientX, e.clientY) });
-    const move = (ev: PointerEvent) => setConnDrag({ id, which, pos: toWorld(ev.clientX, ev.clientY) });
+    const move = (ev: PointerEvent) =>
+      setConnDrag({ id, which, pos: toWorld(ev.clientX, ev.clientY) });
     const up = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       const w = toWorld(ev.clientX, ev.clientY);
       const cn = connRef.current?.connections.get(id);
-      const target = [...sizedElements].reverse().find((el) => w.x >= el.x && w.x <= el.x + el.w && w.y >= el.y && w.y <= el.y + el.h);
+      const target = [...sizedElements]
+        .reverse()
+        .find(
+          (el) =>
+            w.x >= el.x &&
+            w.x <= el.x + el.w &&
+            w.y >= el.y &&
+            w.y <= el.y + el.h,
+        );
       if (cn && target) {
         const other = which === "from" ? cn.to : cn.from;
         if (target.id !== other) patchConnection(id, { [which]: target.id });
@@ -564,11 +715,16 @@ export function Canvas({
       const from = elements.find((el) => el.id === cn?.from);
       const to = elements.find((el) => el.id === cn?.to);
       if (!cn || !from || !to) return;
-      const mid = { x: (from.x + from.w / 2 + to.x + to.w / 2) / 2, y: (from.y + from.h / 2 + to.y + to.h / 2) / 2 };
+      const mid = {
+        x: (from.x + from.w / 2 + to.x + to.w / 2) / 2,
+        y: (from.y + from.h / 2 + to.y + to.h / 2) / 2,
+      };
       const w = toWorld(clientX, clientY);
       // ctrl ≈ 2*(handle - mid) so the curve's midpoint tracks the cursor.
       const bend = { x: 2 * (w.x - mid.x), y: 2 * (w.y - mid.y) };
-      patchConnection(id, { bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend });
+      patchConnection(id, {
+        bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend,
+      });
     };
     const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
     const up = () => {
@@ -583,14 +739,26 @@ export function Canvas({
   const snapEndpoint = (clientX: number, clientY: number): LineEndpoint => {
     const w = toWorld(clientX, clientY);
     const hit = nearestAnchor(w, sizedElements, 12 / view.zoom);
-    return hit ? { x: hit.pt.x, y: hit.pt.y, elementId: hit.elementId, anchor: hit.anchor } : { x: w.x, y: w.y };
+    return hit
+      ? {
+          x: hit.pt.x,
+          y: hit.pt.y,
+          elementId: hit.elementId,
+          anchor: hit.anchor,
+        }
+      : { x: w.x, y: w.y };
   };
   // Drag a line endpoint: it follows the cursor and snaps/pins to an element anchor on release.
-  const startLineEndpointDrag = (id: string, which: "a" | "b", e: React.PointerEvent) => {
+  const startLineEndpointDrag = (
+    id: string,
+    which: "a" | "b",
+    e: React.PointerEvent,
+  ) => {
     if (readOnly) return;
     e.stopPropagation();
     setLineDrag({ id, which, ep: snapEndpoint(e.clientX, e.clientY) });
-    const move = (ev: PointerEvent) => setLineDrag({ id, which, ep: snapEndpoint(ev.clientX, ev.clientY) });
+    const move = (ev: PointerEvent) =>
+      setLineDrag({ id, which, ep: snapEndpoint(ev.clientX, ev.clientY) });
     const up = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -613,7 +781,9 @@ export function Canvas({
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       const w = toWorld(clientX, clientY);
       const bend = { x: 2 * (w.x - mid.x), y: 2 * (w.y - mid.y) };
-      patchLine(id, { bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend });
+      patchLine(id, {
+        bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend,
+      });
     };
     const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
     const up = () => {
@@ -638,10 +808,17 @@ export function Canvas({
     const vp = viewportRef.current?.getBoundingClientRect();
     if (!vp) return v;
     const axis = (pos: number, world: number, viewSize: number) =>
-      world <= viewSize ? (viewSize - world) / 2 : Math.min(0, Math.max(viewSize - world, pos));
-    return { zoom: v.zoom, x: axis(v.x, WORLD_W * v.zoom, vp.width), y: axis(v.y, WORLD_H * v.zoom, vp.height) };
+      world <= viewSize
+        ? (viewSize - world) / 2
+        : Math.min(0, Math.max(viewSize - world, pos));
+    return {
+      zoom: v.zoom,
+      x: axis(v.x, WORLD_W * v.zoom, vp.width),
+      y: axis(v.y, WORLD_H * v.zoom, vp.height),
+    };
   };
-  const setViewClamped = (fn: (v: typeof view) => typeof view) => setView((v) => clampView(fn(v)));
+  const setViewClamped = (fn: (v: typeof view) => typeof view) =>
+    setView((v) => clampView(fn(v)));
 
   // Zoom toward a screen point, keeping that point fixed in world space.
   const zoomAt = (clientX: number, clientY: number, factor: number) => {
@@ -657,7 +834,12 @@ export function Canvas({
   };
   const setZoom = (z: number) => {
     const r = viewportRef.current?.getBoundingClientRect();
-    if (r) zoomAt(r.left + r.width / 2, r.top + r.height / 2, clampZoom(z) / view.zoom);
+    if (r)
+      zoomAt(
+        r.left + r.width / 2,
+        r.top + r.height / 2,
+        clampZoom(z) / view.zoom,
+      );
   };
 
   // --- View options (surfaced to the top bar's View menu) ---
@@ -672,8 +854,16 @@ export function Canvas({
     const pad = 80;
     const bw = Math.max(1, maxX - minX);
     const bh = Math.max(1, maxY - minY);
-    const zoom = clampZoom(Math.min((vp.width - pad * 2) / bw, (vp.height - pad * 2) / bh));
-    setView(clampView({ zoom, x: (vp.width - bw * zoom) / 2 - minX * zoom, y: (vp.height - bh * zoom) / 2 - minY * zoom }));
+    const zoom = clampZoom(
+      Math.min((vp.width - pad * 2) / bw, (vp.height - pad * 2) / bh),
+    );
+    setView(
+      clampView({
+        zoom,
+        x: (vp.width - bw * zoom) / 2 - minX * zoom,
+        y: (vp.height - bh * zoom) / 2 - minY * zoom,
+      }),
+    );
   };
 
   // Publish the full control set whenever undo state or the view changes (the undo events feed
@@ -703,8 +893,10 @@ export function Canvas({
     if (!vp) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
-      else setViewClamped((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      if (e.ctrlKey || e.metaKey)
+        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+      else
+        setViewClamped((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
     };
     vp.addEventListener("wheel", onWheel, { passive: false });
     return () => vp.removeEventListener("wheel", onWheel);
@@ -737,8 +929,17 @@ export function Canvas({
     if (spaceRef.current || e.button === 1) {
       panRef.current = { cx: e.clientX, cy: e.clientY, px: view.x, py: view.y };
     } else {
-      marqueeRef.current = { x0: e.clientX, y0: e.clientY, additive: e.metaKey || e.ctrlKey || e.shiftKey };
-      setMarquee({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY });
+      marqueeRef.current = {
+        x0: e.clientX,
+        y0: e.clientY,
+        additive: e.metaKey || e.ctrlKey || e.shiftKey,
+      };
+      setMarquee({
+        x0: e.clientX,
+        y0: e.clientY,
+        x1: e.clientX,
+        y1: e.clientY,
+      });
     }
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -746,12 +947,18 @@ export function Canvas({
     const w = toWorld(e.clientX, e.clientY);
     connRef.current?.sendCursor(w.x, w.y);
     if (lineDraw) {
-      setLineDraw((d) => (d ? { a: d.a, b: snapEndpoint(e.clientX, e.clientY) } : d));
+      setLineDraw((d) =>
+        d ? { a: d.a, b: snapEndpoint(e.clientX, e.clientY) } : d,
+      );
       return;
     }
     const p = panRef.current;
     if (p) {
-      setViewClamped((v) => ({ ...v, x: p.px + e.clientX - p.cx, y: p.py + e.clientY - p.cy }));
+      setViewClamped((v) => ({
+        ...v,
+        x: p.px + e.clientX - p.cx,
+        y: p.py + e.clientY - p.cy,
+      }));
       return;
     }
     const m = marqueeRef.current;
@@ -760,12 +967,21 @@ export function Canvas({
   const onViewportPointerUp = () => {
     if (lineDraw) {
       // Commit the drawn line if it has length; otherwise discard a stray click.
-      const len = Math.hypot(lineDraw.b.x - lineDraw.a.x, lineDraw.b.y - lineDraw.a.y);
+      const len = Math.hypot(
+        lineDraw.b.x - lineDraw.a.x,
+        lineDraw.b.y - lineDraw.a.y,
+      );
       if (len > 8) {
         const c = connRef.current;
         if (c) {
           const id = crypto.randomUUID();
-          c.lines.set(id, { id, a: lineDraw.a, b: lineDraw.b, arrowStart: false, arrowEnd: false });
+          c.lines.set(id, {
+            id,
+            a: lineDraw.a,
+            b: lineDraw.b,
+            arrowStart: false,
+            arrowEnd: false,
+          });
           setSelectedLine(id);
           setSelectedIds([]);
           setSelectedConn(null);
@@ -780,16 +996,30 @@ export function Canvas({
     marqueeRef.current = null;
     if (!m) return;
     if (!marquee) return;
-    const moved = Math.abs(marquee.x1 - marquee.x0) + Math.abs(marquee.y1 - marquee.y0) > 4;
+    const moved =
+      Math.abs(marquee.x1 - marquee.x0) + Math.abs(marquee.y1 - marquee.y0) > 4;
     if (!moved) {
       if (!m.additive) deselect(); // a click on empty canvas (keep selection when modifier held)
     } else {
       // Select TOP-LEVEL elements intersecting the marquee (column children have stale x/y and live
       // inside their column, so they're excluded). Cmd/Ctrl/Shift adds to the current selection.
-      const a = toWorld(Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1));
-      const b = toWorld(Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1));
-      const hits = topElements.filter((el) => el.x < b.x && el.x + el.w > a.x && el.y < b.y && el.y + el.h > a.y).map((el) => el.id);
-      setSelectedIds((prev) => (m.additive ? Array.from(new Set([...prev, ...hits])) : hits));
+      const a = toWorld(
+        Math.min(marquee.x0, marquee.x1),
+        Math.min(marquee.y0, marquee.y1),
+      );
+      const b = toWorld(
+        Math.max(marquee.x0, marquee.x1),
+        Math.max(marquee.y0, marquee.y1),
+      );
+      const hits = topElements
+        .filter(
+          (el) =>
+            el.x < b.x && el.x + el.w > a.x && el.y < b.y && el.y + el.h > a.y,
+        )
+        .map((el) => el.id);
+      setSelectedIds((prev) =>
+        m.additive ? Array.from(new Set([...prev, ...hits])) : hits,
+      );
       setEditingId(null);
       setCaptionEditing(false);
     }
@@ -836,7 +1066,17 @@ export function Canvas({
     const c = connRef.current;
     if (!c) return;
     const id = crypto.randomUUID();
-    c.elements.set(id, { id, type: "column", x, y, w: 280, h: 120, title: "", children: [], style: { fill: "#ffffff" } });
+    c.elements.set(id, {
+      id,
+      type: "column",
+      x,
+      y,
+      w: 280,
+      h: 120,
+      title: "",
+      children: [],
+      style: { fill: "#ffffff" },
+    });
     selectNew(id);
   };
 
@@ -846,8 +1086,15 @@ export function Canvas({
     if (!c) return;
     c.doc.transact(() => {
       for (const e of c.elements.values()) {
-        if (e.type === "column" && e.children.includes(childId) && e.id !== colId) {
-          c.elements.set(e.id, { ...e, children: e.children.filter((id) => id !== childId) });
+        if (
+          e.type === "column" &&
+          e.children.includes(childId) &&
+          e.id !== colId
+        ) {
+          c.elements.set(e.id, {
+            ...e,
+            children: e.children.filter((id) => id !== childId),
+          });
         }
       }
       const col = c.elements.get(colId);
@@ -864,7 +1111,10 @@ export function Canvas({
     c.doc.transact(() => {
       for (const e of c.elements.values()) {
         if (e.type === "column" && e.children.includes(childId)) {
-          c.elements.set(e.id, { ...e, children: e.children.filter((id) => id !== childId) });
+          c.elements.set(e.id, {
+            ...e,
+            children: e.children.filter((id) => id !== childId),
+          });
         }
       }
       const child = c.elements.get(childId);
@@ -888,14 +1138,55 @@ export function Canvas({
       return { id, x: w0.x - w / 2, y: w0.y - h / 2, w, h };
     };
     switch (toolKey) {
-      case "note": c.elements.set(id, { ...base(220, 120), type: "note", text: "", style: { fill: "#ffffff" } }); break;
-      case "todo": c.elements.set(id, { ...base(240, 140), type: "todo", title: "", items: [{ id: crypto.randomUUID(), text: "", done: false }], style: { fill: "#ffffff" } }); break;
-      case "column": c.elements.set(id, { ...base(280, 120), type: "column", title: "", children: [], style: { fill: "#ffffff" } }); break;
-      case "image": c.elements.set(id, { ...base(280, 180), type: "image", src: "" }); fill = "image"; break;
-      case "link": c.elements.set(id, { ...base(260, 96), type: "link", url: "" }); fill = "link"; break;
-      case "embed": c.elements.set(id, { ...base(360, 203), type: "embed", src: "" }); fill = "embed"; break;
-      case "board": c.elements.set(id, { ...base(200, 116), type: "board", boardId: "", title: "" }); fill = "board"; break;
-      default: return;
+      case "note":
+        c.elements.set(id, {
+          ...base(220, 120),
+          type: "note",
+          text: "",
+          style: { fill: "#ffffff" },
+        });
+        break;
+      case "todo":
+        c.elements.set(id, {
+          ...base(240, 140),
+          type: "todo",
+          title: "",
+          items: [{ id: crypto.randomUUID(), text: "", done: false }],
+          style: { fill: "#ffffff" },
+        });
+        break;
+      case "column":
+        c.elements.set(id, {
+          ...base(280, 120),
+          type: "column",
+          title: "",
+          children: [],
+          style: { fill: "#ffffff" },
+        });
+        break;
+      case "image":
+        c.elements.set(id, { ...base(280, 180), type: "image", src: "" });
+        fill = "image";
+        break;
+      case "link":
+        c.elements.set(id, { ...base(260, 96), type: "link", url: "" });
+        fill = "link";
+        break;
+      case "embed":
+        c.elements.set(id, { ...base(360, 203), type: "embed", src: "" });
+        fill = "embed";
+        break;
+      case "board":
+        c.elements.set(id, {
+          ...base(200, 116),
+          type: "board",
+          boardId: "",
+          title: "",
+        });
+        fill = "board";
+        break;
+      default:
+        return;
     }
     selectNew(id);
     setDraggingId(id);
@@ -938,17 +1229,32 @@ export function Canvas({
   const createBoardElement = async (title: string) => {
     const c = connRef.current;
     const at = boardModal ?? viewportCentre();
-    const target = fillRef.current?.kind === "board" ? fillRef.current.id : null;
+    const target =
+      fillRef.current?.kind === "board" ? fillRef.current.id : null;
     fillRef.current = null;
     if (!c) return;
     try {
-      const b = await api<Board>(`/api/workspaces/${workspaceId}/boards`, { method: "POST", body: JSON.stringify({ title, parentBoardId: boardId }) });
+      const b = await api<Board>(`/api/workspaces/${workspaceId}/boards`, {
+        method: "POST",
+        body: JSON.stringify({ title, parentBoardId: boardId }),
+      });
       if (target) {
         const cur = c.elements.get(target);
-        if (cur?.type === "board") patch(target, { boardId: b.id, title: b.title } as Partial<Element>);
+        if (cur?.type === "board")
+          patch(target, { boardId: b.id, title: b.title } as Partial<Element>);
       } else {
         const id = crypto.randomUUID();
-        c.elements.set(id, { id, type: "board", x: at.x, y: at.y, w: 200, h: 116, boardId: b.id, title: b.title, style: { fill: "#ffffff" } });
+        c.elements.set(id, {
+          id,
+          type: "board",
+          x: at.x,
+          y: at.y,
+          w: 200,
+          h: 116,
+          boardId: b.id,
+          title: b.title,
+          style: { fill: "#ffffff" },
+        });
         selectNew(id);
       }
     } catch {
@@ -969,7 +1275,8 @@ export function Canvas({
   // Embed tool: raw embed code only — paste an <iframe …> snippet.
   const createEmbed = (input: string) => {
     const at = embedModal ?? viewportCentre();
-    const target = fillRef.current?.kind === "embed" ? fillRef.current.id : null;
+    const target =
+      fillRef.current?.kind === "embed" ? fillRef.current.id : null;
     fillRef.current = null;
     const src = extractIframeSrc(input);
     if (!src) {
@@ -979,24 +1286,38 @@ export function Canvas({
     }
     if (target) {
       const cur = connRef.current?.elements.get(target);
-      if (cur?.type === "embed") patch(target, { src, h: embedHeightFor(src, cur.w) } as Partial<Element>);
+      if (cur?.type === "embed")
+        patch(target, {
+          src,
+          h: embedHeightFor(src, cur.w),
+        } as Partial<Element>);
     } else dropEmbed(src, at.x, at.y);
   };
 
   // Unfurl + drop a link card at a point; returns an approximate height for column stacking.
-  const makeLinkAt = async (url: string, x: number, y: number): Promise<number> => {
+  const makeLinkAt = async (
+    url: string,
+    x: number,
+    y: number,
+  ): Promise<number> => {
     try {
       const u = await unfurlLink(boardId, url);
       dropLink(u, url, { x, y });
       return u.imageUrl ? 230 : 120;
     } catch {
-      dropLink({ url, title: null, description: null, imageUrl: null }, url, { x, y });
+      dropLink({ url, title: null, description: null, imageUrl: null }, url, {
+        x,
+        y,
+      });
       return 120;
     }
   };
 
   // Place creators in a vertical column (Milanote-style); each returns its height to stack the next.
-  const pasteColumn = async (makers: Array<(x: number, y: number) => Promise<number> | number>, start?: { x: number; y: number }) => {
+  const pasteColumn = async (
+    makers: Array<(x: number, y: number) => Promise<number> | number>,
+    start?: { x: number; y: number },
+  ) => {
     const at = start ?? viewportCentre();
     let py = at.y;
     for (const make of makers) {
@@ -1007,14 +1328,23 @@ export function Canvas({
 
   // Build element creators from clipboard/drop data and lay them out in a column. Handles multiple
   // items (image files, or an HTML payload with several images/links/embeds). Returns true if handled.
-  const dropClipboard = (files: File[], text: string, html: string, start?: { x: number; y: number }): boolean => {
-    const makers: Array<(x: number, y: number) => Promise<number> | number> = [];
+  const dropClipboard = (
+    files: File[],
+    text: string,
+    html: string,
+    start?: { x: number; y: number },
+  ): boolean => {
+    const makers: Array<(x: number, y: number) => Promise<number> | number> =
+      [];
     for (const f of files) makers.push((x, y) => addImageFile(f, x, y));
     const firstTok = text.split(/\s+/)[0] ?? "";
     if (!files.length) {
       const iframeSrc = extractIframeSrc(text);
       if (iframeSrc) {
-        makers.push((x, y) => { dropEmbed(iframeSrc, x, y); return embedHeightFor(iframeSrc, 360); });
+        makers.push((x, y) => {
+          dropEmbed(iframeSrc, x, y);
+          return embedHeightFor(iframeSrc, 360);
+        });
       } else if (/^https?:\/\//i.test(firstTok)) {
         const at = start ?? viewportCentre();
         void handleUrl(firstTok, at.x, at.y); // single URL — may prompt image/link or embed
@@ -1023,19 +1353,30 @@ export function Canvas({
         const items = parseClipboardHtmlAll(html);
         if (items.length) {
           for (const it of items) {
-            if (it.kind === "iframe") makers.push((x, y) => { dropEmbed(it.value, x, y); return embedHeightFor(it.value, 360); });
-            else if (it.kind === "img") makers.push((x, y) => createImageUrl(it.value, x, y));
+            if (it.kind === "iframe")
+              makers.push((x, y) => {
+                dropEmbed(it.value, x, y);
+                return embedHeightFor(it.value, 360);
+              });
+            else if (it.kind === "img")
+              makers.push((x, y) => createImageUrl(it.value, x, y));
             else makers.push((x, y) => makeLinkAt(it.value, x, y));
           }
         } else if (text) {
-          makers.push((x, y) => { createNote(x, y, text.slice(0, 10000)); return 140; });
+          makers.push((x, y) => {
+            createNote(x, y, text.slice(0, 10000));
+            return 140;
+          });
         }
       }
     } else {
       // Images plus accompanying note text (the text often lives in the HTML, not text/plain).
       const noteText = text || htmlVisibleText(html);
       if (noteText && !/^https?:\/\//i.test(noteText.split(/\s+/)[0] ?? "")) {
-        makers.push((x, y) => { createNote(x, y, noteText.slice(0, 10000)); return 140; });
+        makers.push((x, y) => {
+          createNote(x, y, noteText.slice(0, 10000));
+          return 140;
+        });
       }
     }
     if (!makers.length) return false;
@@ -1049,12 +1390,21 @@ export function Canvas({
   };
 
   // Drop a link preview card from an already-fetched unfurl.
-  const dropLink = (u: Unfurl, url: string, at: { x: number; y: number }, embedSrc?: string) => {
+  const dropLink = (
+    u: Unfurl,
+    url: string,
+    at: { x: number; y: number },
+    embedSrc?: string,
+  ) => {
     const c = connRef.current;
     if (!c) return;
     const id = crypto.randomUUID();
     const w = embedSrc ? 360 : 260;
-    const previewH = embedSrc ? embedHeightFor(embedSrc, w) : u.imageUrl ? 230 : 0;
+    const previewH = embedSrc
+      ? embedHeightFor(embedSrc, w)
+      : u.imageUrl
+        ? 230
+        : 0;
     c.elements.set(id, {
       id,
       type: "link",
@@ -1080,7 +1430,13 @@ export function Canvas({
       const u = await unfurlLink(boardId, url);
       if (target) {
         const cur = connRef.current?.elements.get(target);
-        if (cur?.type === "link") patch(target, { url: u.url || url, title: u.title ?? undefined, description: u.description ?? undefined, image: u.imageUrl ?? undefined } as Partial<Element>);
+        if (cur?.type === "link")
+          patch(target, {
+            url: u.url || url,
+            title: u.title ?? undefined,
+            description: u.description ?? undefined,
+            image: u.imageUrl ?? undefined,
+          } as Partial<Element>);
       } else dropLink(u, url, at);
     } catch {
       toast("Couldn't load that link", "error");
@@ -1098,7 +1454,8 @@ export function Canvas({
     if (embed) {
       const remembered = localStorage.getItem(EMBED_CHOICE_KEY);
       if (remembered === "embed") return dropEmbed(embed, x, y);
-      if (remembered === "link") return void createProviderLink(url, embed, { x, y });
+      if (remembered === "link")
+        return void createProviderLink(url, embed, { x, y });
       setEmbedChoice({ url, embed, at: { x, y } });
       return;
     }
@@ -1112,7 +1469,8 @@ export function Canvas({
     }
     if (!u.imageUrl) return dropLink(u, url, at); // nothing to choose between
     const remembered = localStorage.getItem(URL_CHOICE_KEY);
-    if (remembered === "image") return void createImageUrl(u.imageUrl, at.x, at.y, url, u.title);
+    if (remembered === "image")
+      return void createImageUrl(u.imageUrl, at.x, at.y, url, u.title);
     if (remembered === "link") return dropLink(u, url, at);
     setUrlChoice({ u, url, at });
   };
@@ -1122,13 +1480,24 @@ export function Canvas({
     setUrlChoice(null);
     if (!choice) return;
     if (remember) localStorage.setItem(URL_CHOICE_KEY, kind);
-    if (kind === "image" && choice.u.imageUrl) void createImageUrl(choice.u.imageUrl, choice.at.x, choice.at.y, choice.url, choice.u.title);
+    if (kind === "image" && choice.u.imageUrl)
+      void createImageUrl(
+        choice.u.imageUrl,
+        choice.at.x,
+        choice.at.y,
+        choice.url,
+        choice.u.title,
+      );
     else dropLink(choice.u, choice.url, choice.at);
   };
 
   // Provider link: unfurl for the title (track/video name), then a link card with the live embed
   // as its preview. Falls back to a bare card if the unfurl fails.
-  const createProviderLink = async (url: string, embed: string, at: { x: number; y: number }) => {
+  const createProviderLink = async (
+    url: string,
+    embed: string,
+    at: { x: number; y: number },
+  ) => {
     let u: Unfurl = { url, title: null, description: null, imageUrl: null };
     try {
       u = await unfurlLink(boardId, url);
@@ -1147,7 +1516,11 @@ export function Canvas({
     else void createProviderLink(choice.url, choice.embed, choice.at);
   };
 
-  const addImageFile = async (file: File, x: number, y: number): Promise<number> => {
+  const addImageFile = async (
+    file: File,
+    x: number,
+    y: number,
+  ): Promise<number> => {
     const c = connRef.current;
     if (!c) return 0;
     setBusy(true);
@@ -1158,7 +1531,17 @@ export function Canvas({
       const id = crypto.randomUUID();
       const width = 280;
       const height = Math.max(40, Math.round((width * h) / w));
-      c.elements.set(id, { id, type: "image", x, y, w: width, h: height, src: displayUrl, mediaId, alt: file.name });
+      c.elements.set(id, {
+        id,
+        type: "image",
+        x,
+        y,
+        w: width,
+        h: height,
+        src: displayUrl,
+        mediaId,
+        alt: file.name,
+      });
       selectNew(id);
       toast("Image added", "success");
       return height;
@@ -1172,7 +1555,13 @@ export function Canvas({
 
   // Image element from an external URL (no upload) — used for image URLs dropped/pasted in. When
   // it came from a web page (the image vs link chooser), attribute the source as a caption.
-  const createImageUrl = async (src: string, x: number, y: number, sourceUrl?: string, title?: string | null): Promise<number> => {
+  const createImageUrl = async (
+    src: string,
+    x: number,
+    y: number,
+    sourceUrl?: string,
+    title?: string | null,
+  ): Promise<number> => {
     const c = connRef.current;
     if (!c) return 0;
     const { w, h } = await loadImageSize(src);
@@ -1181,7 +1570,9 @@ export function Canvas({
     const height = Math.max(40, Math.round((width * h) / w));
     // Caption is the page title (hyperlinked to the source), falling back to the site name.
     const text = (title ?? "").trim() || (sourceUrl ? siteName(sourceUrl) : "");
-    const caption = sourceUrl ? `<a href="${sourceUrl}">${escapeText(text)}</a>` : undefined;
+    const caption = sourceUrl
+      ? `<a href="${sourceUrl}">${escapeText(text)}</a>`
+      : undefined;
     c.elements.set(id, {
       id,
       type: "image",
@@ -1199,7 +1590,8 @@ export function Canvas({
   const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    const target = fillRef.current?.kind === "image" ? fillRef.current.id : null;
+    const target =
+      fillRef.current?.kind === "image" ? fillRef.current.id : null;
     fillRef.current = null;
     if (!file) {
       if (target) connRef.current?.elements.delete(target); // picker canceled → drop placeholder
@@ -1212,7 +1604,13 @@ export function Canvas({
         setMediaUrls((m) => ({ ...m, [mediaId]: displayUrl }));
         const { w, h } = await loadImageSize(displayUrl);
         const cur = connRef.current?.elements.get(target);
-        if (cur?.type === "image") patch(target, { src: displayUrl, mediaId, alt: file.name, h: Math.max(40, Math.round((cur.w * h) / w)) } as Partial<Element>);
+        if (cur?.type === "image")
+          patch(target, {
+            src: displayUrl,
+            mediaId,
+            alt: file.name,
+            h: Math.max(40, Math.round((cur.w * h) / w)),
+          } as Partial<Element>);
         toast("Image added", "success");
       } catch (err) {
         toast(err instanceof Error ? err.message : "Upload failed", "error");
@@ -1246,8 +1644,13 @@ export function Canvas({
     if (readOnly) return;
     const { x, y } = toWorld(e.clientX, e.clientY);
 
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-    const uri = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain")).trim();
+    const files = Array.from(e.dataTransfer.files).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    const uri = (
+      e.dataTransfer.getData("text/uri-list") ||
+      e.dataTransfer.getData("text/plain")
+    ).trim();
     const html = e.dataTransfer.getData("text/html");
     dropClipboard(files, uri, html, { x, y });
   };
@@ -1386,7 +1789,11 @@ export function Canvas({
       return { style } as Partial<Element>;
     });
   const captionVisible = (e: Element) =>
-    e.type === "image" ? !!e.showCaption : e.type === "link" ? !e.hideCaption : false;
+    e.type === "image"
+      ? !!e.showCaption
+      : e.type === "link"
+        ? !e.hideCaption
+        : false;
   const toggleCaptionAll = () => {
     const target = !selectedEls.every(captionVisible);
     eachSelected((e) =>
@@ -1399,7 +1806,9 @@ export function Canvas({
   };
   const togglePreviewAll = () => {
     const target = !selectedEls.every((e) => e.type === "link" && !e.hideImage);
-    eachSelected((e) => (e.type === "link" ? ({ hideImage: !target } as Partial<Element>) : null));
+    eachSelected((e) =>
+      e.type === "link" ? ({ hideImage: !target } as Partial<Element>) : null,
+    );
   };
 
   // Render one element card. `embedded` cards live inside a column (relative flow, drag = reparent).
@@ -1410,7 +1819,11 @@ export function Canvas({
       embedded={embedded}
       selected={selectedIds.includes(el.id)}
       editing={el.id === editingId}
-      imgUrl={el.type === "image" ? (el.mediaId && mediaUrls[el.mediaId]) || el.src : undefined}
+      imgUrl={
+        el.type === "image"
+          ? (el.mediaId && mediaUrls[el.mediaId]) || el.src
+          : undefined
+      }
       onSelect={() => selectId(el.id)}
       onToggleSelect={() => toggleSelect(el.id)}
       onEdit={() => setEditingId(el.id)}
@@ -1418,9 +1831,23 @@ export function Canvas({
       onResize={(w, h) => patch(el.id, { w, h })}
       onText={(text) => patch(el.id, { text } as Partial<Element>)}
       onRegister={(e) => (editorRef.current = e)}
-      onOpen={el.type === "link" ? () => window.open(el.url, "_blank", "noopener,noreferrer") : el.type === "board" ? () => onOpenBoard(el.boardId) : undefined}
-      onCaption={el.type === "image" ? (h) => patch(el.id, { caption: h } as Partial<Element>) : undefined}
-      onTodo={el.type === "todo" ? (p) => patch(el.id, p as Partial<Element>) : undefined}
+      onOpen={
+        el.type === "link"
+          ? () => window.open(el.url, "_blank", "noopener,noreferrer")
+          : el.type === "board"
+            ? () => onOpenBoard(el.boardId)
+            : undefined
+      }
+      onCaption={
+        el.type === "image"
+          ? (h) => patch(el.id, { caption: h } as Partial<Element>)
+          : undefined
+      }
+      onTodo={
+        el.type === "todo"
+          ? (p) => patch(el.id, p as Partial<Element>)
+          : undefined
+      }
       onStartLink={(e) => startLink(el.id, e)}
       onSize={reportHeight}
       freshlyCreated={justCreated === el.id}
@@ -1431,10 +1858,26 @@ export function Canvas({
         setCaptionEditing(true);
       }}
       onEmbeddedDragStart={(e) => startColumnChildDrag(el.id, e)}
-      onColumnTitle={el.type === "column" ? (t) => patch(el.id, { title: t } as Partial<Element>) : undefined}
-      onToggleCollapse={el.type === "column" ? () => patch(el.id, { collapsed: !el.collapsed } as Partial<Element>) : undefined}
-      colDropIndex={el.type === "column" && colDrop?.colId === el.id ? colDrop.index : undefined}
-      renderColumnChild={el.type === "column" ? (cid: string) => renderColumnChild(cid) : undefined}
+      onColumnTitle={
+        el.type === "column"
+          ? (t) => patch(el.id, { title: t } as Partial<Element>)
+          : undefined
+      }
+      onToggleCollapse={
+        el.type === "column"
+          ? () => patch(el.id, { collapsed: !el.collapsed } as Partial<Element>)
+          : undefined
+      }
+      colDropIndex={
+        el.type === "column" && colDrop?.colId === el.id
+          ? colDrop.index
+          : undefined
+      }
+      renderColumnChild={
+        el.type === "column"
+          ? (cid: string) => renderColumnChild(cid)
+          : undefined
+      }
       shrink={draggingId === el.id && overDelete}
       dragging={draggingId === el.id}
       zoom={view.zoom}
@@ -1454,20 +1897,44 @@ export function Canvas({
       {readOnly ? (
         <nav className="flex w-20 shrink-0 flex-col items-center gap-2 border-r-2 border-slate-100 bg-white py-3 text-center">
           <Icon.EyeIcon className="text-xl text-slate-400" />
-          <span className="px-1 text-[10px] font-bold leading-tight text-slate-400">View only</span>
+          <span className="px-1 text-[10px] font-bold leading-tight text-slate-400">
+            View only
+          </span>
         </nav>
       ) : selectedConn && connections.find((c) => c.id === selectedConn) ? (
         <ConnectionSubRail
           conn={connections.find((c) => c.id === selectedConn)!}
           onDone={() => setSelectedConn(null)}
-          onColor={(hex: string) => patchConnection(selectedConn, { color: hex })}
-          onToggleStart={() => patchConnection(selectedConn, { arrowStart: !(connections.find((c) => c.id === selectedConn)!.arrowStart ?? false) })}
-          onToggleEnd={() => patchConnection(selectedConn, { arrowEnd: !(connections.find((c) => c.id === selectedConn)!.arrowEnd ?? true) })}
+          onColor={(hex: string) =>
+            patchConnection(selectedConn, { color: hex })
+          }
+          onToggleStart={() =>
+            patchConnection(selectedConn, {
+              arrowStart: !(
+                connections.find((c) => c.id === selectedConn)!.arrowStart ??
+                false
+              ),
+            })
+          }
+          onToggleEnd={() =>
+            patchConnection(selectedConn, {
+              arrowEnd: !(
+                connections.find((c) => c.id === selectedConn)!.arrowEnd ?? true
+              ),
+            })
+          }
           onLabel={() => setEditingConnLabel(selectedConn)}
-          onToggleDashed={() => patchConnection(selectedConn, { dashed: !connections.find((c) => c.id === selectedConn)!.dashed })}
+          onToggleDashed={() =>
+            patchConnection(selectedConn, {
+              dashed: !connections.find((c) => c.id === selectedConn)!.dashed,
+            })
+          }
           onCycleWeight={() => {
-            const w = connections.find((c) => c.id === selectedConn)!.weight ?? 2;
-            patchConnection(selectedConn, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 });
+            const w =
+              connections.find((c) => c.id === selectedConn)!.weight ?? 2;
+            patchConnection(selectedConn, {
+              weight: w === 2 ? 4 : w === 4 ? 6 : 2,
+            });
           }}
           onDelete={() => removeConnection(selectedConn)}
         />
@@ -1476,10 +1943,22 @@ export function Canvas({
           conn={lines.find((l) => l.id === selectedLine)!}
           onDone={() => setSelectedLine(null)}
           onColor={(hex: string) => patchLine(selectedLine, { color: hex })}
-          onToggleStart={() => patchLine(selectedLine, { arrowStart: !lines.find((l) => l.id === selectedLine)!.arrowStart })}
-          onToggleEnd={() => patchLine(selectedLine, { arrowEnd: !lines.find((l) => l.id === selectedLine)!.arrowEnd })}
+          onToggleStart={() =>
+            patchLine(selectedLine, {
+              arrowStart: !lines.find((l) => l.id === selectedLine)!.arrowStart,
+            })
+          }
+          onToggleEnd={() =>
+            patchLine(selectedLine, {
+              arrowEnd: !lines.find((l) => l.id === selectedLine)!.arrowEnd,
+            })
+          }
           onLabel={() => setEditingLineLabel(selectedLine)}
-          onToggleDashed={() => patchLine(selectedLine, { dashed: !lines.find((l) => l.id === selectedLine)!.dashed })}
+          onToggleDashed={() =>
+            patchLine(selectedLine, {
+              dashed: !lines.find((l) => l.id === selectedLine)!.dashed,
+            })
+          }
           onCycleWeight={() => {
             const w = lines.find((l) => l.id === selectedLine)!.weight ?? 2;
             patchLine(selectedLine, { weight: w === 2 ? 4 : w === 4 ? 6 : 2 });
@@ -1584,7 +2063,11 @@ export function Canvas({
           deleteRef={deleteRef}
           deleteActive={overDelete}
           onDone={deselect}
-          onToggleCollapse={() => patch(selected.id, { collapsed: !selected.collapsed } as Partial<Element>)}
+          onToggleCollapse={() =>
+            patch(selected.id, {
+              collapsed: !selected.collapsed,
+            } as Partial<Element>)
+          }
           onFill={(hex) => setStyleKey("fill", hex)}
           onStrip={(hex) => setStyleKey("strip", hex)}
           onDelete={() => selectedId && remove(selectedId)}
@@ -1594,7 +2077,9 @@ export function Canvas({
           tools={createTools}
           deleteRef={deleteRef}
           deleteActive={overDelete}
-          onDelete={selectedIds.length ? () => removeMany(selectedIds) : undefined}
+          onDelete={
+            selectedIds.length ? () => removeMany(selectedIds) : undefined
+          }
         />
       )}
       <input
@@ -1640,9 +2125,21 @@ export function Canvas({
         onSubmit={createEmbed}
       />
 
-      {urlChoice && <UrlChoiceModal preview={urlChoice.u} onPick={applyUrlChoice} onClose={() => setUrlChoice(null)} />}
+      {urlChoice && (
+        <UrlChoiceModal
+          preview={urlChoice.u}
+          onPick={applyUrlChoice}
+          onClose={() => setUrlChoice(null)}
+        />
+      )}
 
-      {embedChoice && <EmbedChoiceModal embed={embedChoice.embed} onPick={applyEmbedChoice} onClose={() => setEmbedChoice(null)} />}
+      {embedChoice && (
+        <EmbedChoiceModal
+          embed={embedChoice.embed}
+          onPick={applyEmbedChoice}
+          onClose={() => setEmbedChoice(null)}
+        />
+      )}
 
       <div
         ref={viewportRef}
@@ -1655,11 +2152,15 @@ export function Canvas({
           if (!dragOver) setDragOver(true);
         }}
         onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
+          if (!e.currentTarget.contains(e.relatedTarget as Node))
+            setDragOver(false);
         }}
         onDrop={onDrop}
       >
-        <div className="absolute right-4 top-4 z-30 flex items-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
+        <div
+          className="absolute right-4 top-4 z-30 flex items-center gap-2"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <Badge tone={status === "online" ? "green" : "slate"}>{status}</Badge>
           <button
             onClick={() => {
@@ -1673,7 +2174,9 @@ export function Canvas({
             className={`relative grid h-8 w-8 place-items-center rounded-lg border-2 shadow-sm ${showComments ? "border-primary bg-primary text-white" : "border-slate-100 bg-white text-slate-500 hover:text-primary"}`}
           >
             <Icon.ChatIcon className="text-base" />
-            {unreadComments && !showComments && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-primary" />}
+            {unreadComments && !showComments && (
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-primary" />
+            )}
           </button>
         </div>
         {dragOver && (
@@ -1692,14 +2195,26 @@ export function Canvas({
           />
         )}
         {/* Zoom control */}
-        <div className="absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-white px-1 py-1 text-xs font-bold text-slate-500 shadow-sm" onPointerDown={(e) => e.stopPropagation()}>
-          <button className="h-6 w-6 rounded hover:bg-slate-100" onClick={() => setZoom(view.zoom / 1.2)}>
+        <div
+          className="absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-white px-1 py-1 text-xs font-bold text-slate-500 shadow-sm"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className="h-6 w-6 rounded hover:bg-slate-100"
+            onClick={() => setZoom(view.zoom / 1.2)}
+          >
             −
           </button>
-          <button className="w-12 rounded hover:bg-slate-100" onClick={() => setZoom(1)}>
+          <button
+            className="w-12 rounded hover:bg-slate-100"
+            onClick={() => setZoom(1)}
+          >
             {Math.round(view.zoom * 100)}%
           </button>
-          <button className="h-6 w-6 rounded hover:bg-slate-100" onClick={() => setZoom(view.zoom * 1.2)}>
+          <button
+            className="h-6 w-6 rounded hover:bg-slate-100"
+            onClick={() => setZoom(view.zoom * 1.2)}
+          >
             +
           </button>
         </div>
@@ -1707,12 +2222,29 @@ export function Canvas({
           <div
             ref={surfaceRef}
             className={`absolute left-0 top-0 origin-top-left [background-size:24px_24px] ${showGrid ? "bg-[radial-gradient(circle,#d8dde6_1px,transparent_1px)]" : ""}`}
-            style={{ width: WORLD_W, height: WORLD_H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
+            style={{
+              width: WORLD_W,
+              height: WORLD_H,
+              transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
+            }}
           >
             {/* Lines render behind elements; handles + labels render above (after the cards). */}
             <ConnectionLines
               lines={connLines}
-              temp={linking && linkEnd ? { from: sizedElements.find((e) => e.id === linking.from) ?? null, end: linkEnd, target: linkTarget ? sizedElements.find((e) => e.id === linkTarget) ?? null : null } : null}
+              temp={
+                linking && linkEnd
+                  ? {
+                      from:
+                        sizedElements.find((e) => e.id === linking.from) ??
+                        null,
+                      end: linkEnd,
+                      target: linkTarget
+                        ? (sizedElements.find((e) => e.id === linkTarget) ??
+                          null)
+                        : null,
+                    }
+                  : null
+              }
               readOnly={readOnly}
               selectedId={selectedConn}
               onSelect={(id) => {
@@ -1723,7 +2255,14 @@ export function Canvas({
             />
             <LineLayer
               geo={lineGeo}
-              draw={lineDraw ? { a: { x: lineDraw.a.x, y: lineDraw.a.y }, b: { x: lineDraw.b.x, y: lineDraw.b.y } } : null}
+              draw={
+                lineDraw
+                  ? {
+                      a: { x: lineDraw.a.x, y: lineDraw.a.y },
+                      b: { x: lineDraw.b.x, y: lineDraw.b.y },
+                    }
+                  : null
+              }
               readOnly={readOnly}
               selectedId={selectedLine}
               onSelect={(id) => {
@@ -1735,15 +2274,21 @@ export function Canvas({
             />
             {topElements.map((el) => renderElementCard(el, false))}
             {/* Highlight the element a connection drag would land on. */}
-            {linkTarget && (() => {
-              const t = sizedElements.find((e) => e.id === linkTarget);
-              return t ? (
-                <div
-                  className="pointer-events-none absolute z-[6] rounded-lg border-2 border-primary bg-primary/5"
-                  style={{ left: t.x - 3, top: t.y - 3, width: t.w + 6, height: t.h + 6 }}
-                />
-              ) : null;
-            })()}
+            {linkTarget &&
+              (() => {
+                const t = sizedElements.find((e) => e.id === linkTarget);
+                return t ? (
+                  <div
+                    className="pointer-events-none absolute z-[6] rounded-lg border-2 border-primary bg-primary/5"
+                    style={{
+                      left: t.x - 3,
+                      top: t.y - 3,
+                      width: t.w + 6,
+                      height: t.h + 6,
+                    }}
+                  />
+                ) : null;
+              })()}
             <ConnectionOverlay
               lines={connLines}
               zoom={view.zoom}
@@ -1798,6 +2343,16 @@ export function Canvas({
           showCommentsRef.current = false;
         }}
       />
+
+      {/* Detached preview of a column child following the cursor while dragging it out. */}
+      {childDragGhost && elementsById.get(childDragGhost.id) && (
+        <div
+          className="pointer-events-none fixed z-[120] w-60 -translate-x-1/2 -translate-y-1/2 opacity-80 drop-shadow-xl"
+          style={{ left: childDragGhost.cx, top: childDragGhost.cy }}
+        >
+          {renderElementCard(elementsById.get(childDragGhost.id)!, true)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1808,10 +2363,25 @@ function PeerCursor({ peer, zoom }: { peer: Peer; zoom: number }) {
   return (
     <div
       className="pointer-events-none absolute left-0 top-0 z-50"
-      style={{ transform: `translate(${peer.cursor.x}px, ${peer.cursor.y}px) scale(${1 / zoom})`, transformOrigin: "top left" }}
+      style={{
+        transform: `translate(${peer.cursor.x}px, ${peer.cursor.y}px) scale(${1 / zoom})`,
+        transformOrigin: "top left",
+      }}
     >
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" className="drop-shadow">
-        <path d="M2 2l6 14 2.5-5.5L16 8 2 2z" fill={peer.color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 20 20"
+        fill="none"
+        className="drop-shadow"
+      >
+        <path
+          d="M2 2l6 14 2.5-5.5L16 8 2 2z"
+          fill={peer.color}
+          stroke="white"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
       </svg>
       <span
         className="ml-3 inline-block whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-bold text-white shadow"
@@ -1824,18 +2394,33 @@ function PeerCursor({ peer, zoom }: { peer: Peer; zoom: number }) {
 }
 
 // Point on an element's border in the direction of (tx,ty) — where an arrow should touch.
-function edgePoint(e: Element, tx: number, ty: number): { x: number; y: number } {
+function edgePoint(
+  e: Element,
+  tx: number,
+  ty: number,
+): { x: number; y: number } {
   const x = e.x + e.w / 2;
   const y = e.y + e.h / 2;
   const dx = tx - x;
   const dy = ty - y;
   if (!dx && !dy) return { x, y };
-  const s = 1 / Math.max(Math.abs(dx) / (e.w / 2 || 1), Math.abs(dy) / (e.h / 2 || 1));
+  const s =
+    1 / Math.max(Math.abs(dx) / (e.w / 2 || 1), Math.abs(dy) / (e.h / 2 || 1));
   return { x: x + dx * s, y: y + dy * s };
 }
 
 // The 9 snap anchors of an element: corners, edge-midpoints, centre.
-const ANCHOR_KEYS: AnchorKey[] = ["tl", "tm", "tr", "lm", "c", "rm", "bl", "bm", "br"];
+const ANCHOR_KEYS: AnchorKey[] = [
+  "tl",
+  "tm",
+  "tr",
+  "lm",
+  "c",
+  "rm",
+  "bl",
+  "bm",
+  "br",
+];
 function anchorPoint(el: Element, key: AnchorKey): { x: number; y: number } {
   const left = key === "tl" || key === "lm" || key === "bl";
   const right = key === "tr" || key === "rm" || key === "br";
@@ -1847,8 +2432,20 @@ function anchorPoint(el: Element, key: AnchorKey): { x: number; y: number } {
   };
 }
 // Nearest element anchor to a world point within threshold; null if none close.
-function nearestAnchor(p: { x: number; y: number }, els: Element[], threshold: number): { elementId: string; anchor: AnchorKey; pt: { x: number; y: number } } | null {
-  let best: { elementId: string; anchor: AnchorKey; pt: { x: number; y: number } } | null = null;
+function nearestAnchor(
+  p: { x: number; y: number },
+  els: Element[],
+  threshold: number,
+): {
+  elementId: string;
+  anchor: AnchorKey;
+  pt: { x: number; y: number };
+} | null {
+  let best: {
+    elementId: string;
+    anchor: AnchorKey;
+    pt: { x: number; y: number };
+  } | null = null;
   let bestD = threshold;
   for (const el of els) {
     for (const k of ANCHOR_KEYS) {
@@ -1863,7 +2460,10 @@ function nearestAnchor(p: { x: number; y: number }, els: Element[], threshold: n
   return best;
 }
 // Resolve a line endpoint to a world point — a pinned endpoint tracks its element's anchor.
-function resolveEnd(ep: LineEndpoint, byId: Map<string, Element>): { x: number; y: number } {
+function resolveEnd(
+  ep: LineEndpoint,
+  byId: Map<string, Element>,
+): { x: number; y: number } {
   if (ep.elementId && ep.anchor) {
     const el = byId.get(ep.elementId);
     if (el) return anchorPoint(el, ep.anchor);
@@ -1885,7 +2485,11 @@ export interface ConnLine {
 // arrowhead, so the line tucks behind the card and emerges cleanly at its edge regardless of the
 // card's exact size; the arrowhead end anchors on the border so the head sits at the edge. Handles
 // and the label use the visible edge points. A dragged endpoint follows the cursor.
-function computeLines(elements: Element[], connections: Connection[], connDrag: { id: string; which: "from" | "to"; pos: Pt } | null): ConnLine[] {
+function computeLines(
+  elements: Element[],
+  connections: Connection[],
+  connDrag: { id: string; which: "from" | "to"; pos: Pt } | null,
+): ConnLine[] {
   const byId = new Map(elements.map((e) => [e.id, e]));
   const out: ConnLine[] = [];
   for (const c of connections) {
@@ -1894,12 +2498,19 @@ function computeLines(elements: Element[], connections: Connection[], connDrag: 
     if (!from || !to) continue;
     const fromC = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
     const toC = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
-    const ctrl = c.bend ? { x: (fromC.x + toC.x) / 2 + c.bend.x, y: (fromC.y + toC.y) / 2 + c.bend.y } : null;
+    const ctrl = c.bend
+      ? {
+          x: (fromC.x + toC.x) / 2 + c.bend.x,
+          y: (fromC.y + toC.y) / 2 + c.bend.y,
+        }
+      : null;
     const dragFrom = connDrag?.id === c.id && connDrag.which === "from";
     const dragTo = connDrag?.id === c.id && connDrag.which === "to";
     const fromAim = ctrl ?? (dragTo ? connDrag!.pos : toC);
     const toAim = ctrl ?? (dragFrom ? connDrag!.pos : fromC);
-    const edge1 = dragFrom ? connDrag!.pos : edgePoint(from, fromAim.x, fromAim.y);
+    const edge1 = dragFrom
+      ? connDrag!.pos
+      : edgePoint(from, fromAim.x, fromAim.y);
     const edge2 = dragTo ? connDrag!.pos : edgePoint(to, toAim.x, toAim.y);
     const startArrow = c.arrowStart ?? false;
     const endArrow = c.arrowEnd ?? true;
@@ -1907,16 +2518,28 @@ function computeLines(elements: Element[], connections: Connection[], connDrag: 
     const draw1 = dragFrom ? connDrag!.pos : startArrow ? edge1 : fromC;
     const draw2 = dragTo ? connDrag!.pos : endArrow ? edge2 : toC;
     const handle = ctrl
-      ? { x: 0.25 * edge1.x + 0.5 * ctrl.x + 0.25 * edge2.x, y: 0.25 * edge1.y + 0.5 * ctrl.y + 0.25 * edge2.y }
+      ? {
+          x: 0.25 * edge1.x + 0.5 * ctrl.x + 0.25 * edge2.x,
+          y: 0.25 * edge1.y + 0.5 * ctrl.y + 0.25 * edge2.y,
+        }
       : { x: (edge1.x + edge2.x) / 2, y: (edge1.y + edge2.y) / 2 };
-    out.push({ c, p1: edge1, p2: edge2, ctrl, handle, d: connPath(draw1, draw2, ctrl) });
+    out.push({
+      c,
+      p1: edge1,
+      p2: edge2,
+      ctrl,
+      handle,
+      d: connPath(draw1, draw2, ctrl),
+    });
   }
   return out;
 }
 
 // Straight by default; a quadratic through the control point when bent.
 function connPath(p1: Pt, p2: Pt, ctrl: Pt | null): string {
-  return ctrl ? `M${p1.x},${p1.y} Q${ctrl.x},${ctrl.y} ${p2.x},${p2.y}` : `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+  return ctrl
+    ? `M${p1.x},${p1.y} Q${ctrl.x},${ctrl.y} ${p2.x},${p2.y}`
+    : `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
 }
 
 const CONN_DEFAULT = "#475569"; // slate-600
@@ -1930,30 +2553,69 @@ export interface LineGeo {
   d: string;
 }
 // Resolve standalone-line geometry (endpoints + optional bend), honouring a dragged endpoint.
-function computeLineGeo(lines: LineShape[], elements: Element[], lineDrag: { id: string; which: "a" | "b"; ep: LineEndpoint } | null): LineGeo[] {
+function computeLineGeo(
+  lines: LineShape[],
+  elements: Element[],
+  lineDrag: { id: string; which: "a" | "b"; ep: LineEndpoint } | null,
+): LineGeo[] {
   const byId = new Map(elements.map((e) => [e.id, e]));
   return lines.map((l) => {
-    const aEp = lineDrag?.id === l.id && lineDrag.which === "a" ? lineDrag.ep : l.a;
-    const bEp = lineDrag?.id === l.id && lineDrag.which === "b" ? lineDrag.ep : l.b;
+    const aEp =
+      lineDrag?.id === l.id && lineDrag.which === "a" ? lineDrag.ep : l.a;
+    const bEp =
+      lineDrag?.id === l.id && lineDrag.which === "b" ? lineDrag.ep : l.b;
     const a = resolveEnd(aEp, byId);
     const b = resolveEnd(bEp, byId);
-    const ctrl = l.bend ? { x: (a.x + b.x) / 2 + l.bend.x, y: (a.y + b.y) / 2 + l.bend.y } : null;
-    const handle = ctrl ? { x: 0.25 * a.x + 0.5 * ctrl.x + 0.25 * b.x, y: 0.25 * a.y + 0.5 * ctrl.y + 0.25 * b.y } : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const ctrl = l.bend
+      ? { x: (a.x + b.x) / 2 + l.bend.x, y: (a.y + b.y) / 2 + l.bend.y }
+      : null;
+    const handle = ctrl
+      ? {
+          x: 0.25 * a.x + 0.5 * ctrl.x + 0.25 * b.x,
+          y: 0.25 * a.y + 0.5 * ctrl.y + 0.25 * b.y,
+        }
+      : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     return { l, a, b, ctrl, handle, d: connPath(a, b, ctrl) };
   });
 }
 
 // Standalone-line paths (behind elements). `draw` is the in-progress line being drawn.
-function LineLayer({ geo, draw, readOnly, selectedId, onSelect }: { geo: LineGeo[]; draw: { a: Pt; b: Pt } | null; readOnly?: boolean; selectedId: string | null; onSelect: (id: string) => void }) {
+function LineLayer({
+  geo,
+  draw,
+  readOnly,
+  selectedId,
+  onSelect,
+}: {
+  geo: LineGeo[];
+  draw: { a: Pt; b: Pt } | null;
+  readOnly?: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
   return (
-    <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
+    <svg
+      className="pointer-events-none absolute left-0 top-0 overflow-visible"
+      width={WORLD_W}
+      height={WORLD_H}
+    >
       {geo.map(({ l, d }) => {
         const sel = l.id === selectedId;
         return (
           <g
             key={l.id}
-            style={{ pointerEvents: readOnly ? "none" : "stroke", cursor: readOnly ? "default" : "pointer" }}
-            onPointerDown={readOnly ? undefined : (e) => { e.stopPropagation(); onSelect(l.id); }}
+            style={{
+              pointerEvents: readOnly ? "none" : "stroke",
+              cursor: readOnly ? "default" : "pointer",
+            }}
+            onPointerDown={
+              readOnly
+                ? undefined
+                : (e) => {
+                    e.stopPropagation();
+                    onSelect(l.id);
+                  }
+            }
           >
             <path d={d} fill="none" stroke="transparent" strokeWidth={16} />
             <path
@@ -1968,7 +2630,15 @@ function LineLayer({ geo, draw, readOnly, selectedId, onSelect }: { geo: LineGeo
           </g>
         );
       })}
-      {draw && <path d={connPath(draw.a, draw.b, null)} fill="none" stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" />}
+      {draw && (
+        <path
+          d={connPath(draw.a, draw.b, null)}
+          fill="none"
+          stroke="#6e24ff"
+          strokeWidth={2}
+          strokeDasharray="5 4"
+        />
+      )}
     </svg>
   );
 }
@@ -2002,7 +2672,12 @@ function LineOverlay({
   return (
     <>
       {snapPt && (
-        <div className="pointer-events-none absolute left-0 top-0 z-[8] h-4 w-4 rounded-full border-2 border-primary" style={{ transform: `translate(${snapPt.x}px, ${snapPt.y}px) translate(-50%, -50%) scale(${1 / zoom})` }} />
+        <div
+          className="pointer-events-none absolute left-0 top-0 z-[8] h-4 w-4 rounded-full border-2 border-primary"
+          style={{
+            transform: `translate(${snapPt.x}px, ${snapPt.y}px) translate(-50%, -50%) scale(${1 / zoom})`,
+          }}
+        />
       )}
       {geo.map(({ l, a, b, handle }) => {
         const sel = l.id === selectedId && !readOnly;
@@ -2011,15 +2686,33 @@ function LineOverlay({
           <div key={l.id}>
             {sel && (
               <>
-                <Handle pt={a} zoom={zoom} onPointerDown={(e) => onEndpointDown(l.id, "a", e)} />
-                <Handle pt={b} zoom={zoom} onPointerDown={(e) => onEndpointDown(l.id, "b", e)} />
-                {!editing && <Handle pt={handle} zoom={zoom} bend onPointerDown={(e) => onBendDown(l.id, e)} onDoubleClick={() => onBendReset(l.id)} />}
+                <Handle
+                  pt={a}
+                  zoom={zoom}
+                  onPointerDown={(e) => onEndpointDown(l.id, "a", e)}
+                />
+                <Handle
+                  pt={b}
+                  zoom={zoom}
+                  onPointerDown={(e) => onEndpointDown(l.id, "b", e)}
+                />
+                {!editing && (
+                  <Handle
+                    pt={handle}
+                    zoom={zoom}
+                    bend
+                    onPointerDown={(e) => onBendDown(l.id, e)}
+                    onDoubleClick={() => onBendReset(l.id)}
+                  />
+                )}
               </>
             )}
             {(editing || l.label) && (
               <div
                 className="absolute left-0 top-0 z-[6]"
-                style={{ transform: `translate(${handle.x}px, ${handle.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+                style={{
+                  transform: `translate(${handle.x}px, ${handle.y}px) translate(-50%, -50%) scale(${1 / zoom})`,
+                }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {editing ? (
@@ -2029,15 +2722,24 @@ function LineOverlay({
                     placeholder="Label"
                     onBlur={(e) => onLabelCommit(l.id, e.target.value.trim())}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      if (e.key === "Escape") onLabelCommit(l.id, l.label ?? "");
+                      if (e.key === "Enter")
+                        (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape")
+                        onLabelCommit(l.id, l.label ?? "");
                     }}
                     className="w-28 rounded-md border-2 border-primary bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 outline-none"
                   />
                 ) : readOnly ? (
-                  <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{l.label}</span>
+                  <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
+                    {l.label}
+                  </span>
                 ) : (
-                  <button onClick={() => onSelect(l.id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{l.label}</button>
+                  <button
+                    onClick={() => onSelect(l.id)}
+                    className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm"
+                  >
+                    {l.label}
+                  </button>
                 )}
               </div>
             )}
@@ -2064,14 +2766,42 @@ function ConnectionLines({
 }) {
   // Preview starts at the source CENTRE; if hovering a valid target it clings to that element's
   // edge (toward the source), otherwise it follows the cursor.
-  const tempStart = temp?.from ? { x: temp.from.x + temp.from.w / 2, y: temp.from.y + temp.from.h / 2 } : null;
-  const tempEnd = temp ? (temp.target && tempStart ? edgePoint(temp.target, tempStart.x, tempStart.y) : temp.end) : null;
+  const tempStart = temp?.from
+    ? { x: temp.from.x + temp.from.w / 2, y: temp.from.y + temp.from.h / 2 }
+    : null;
+  const tempEnd = temp
+    ? temp.target && tempStart
+      ? edgePoint(temp.target, tempStart.x, tempStart.y)
+      : temp.end
+    : null;
   return (
-    <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={WORLD_W} height={WORLD_H}>
+    <svg
+      className="pointer-events-none absolute left-0 top-0 overflow-visible"
+      width={WORLD_W}
+      height={WORLD_H}
+    >
       <defs>
         {/* context-stroke makes each arrowhead match its line colour; start head reverses. */}
-        <marker id="conn-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="context-stroke" /></marker>
-        <marker id="conn-arrow-start" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto-start-reverse"><path d="M0,0 L6,3 L0,6 Z" fill="context-stroke" /></marker>
+        <marker
+          id="conn-arrow"
+          markerWidth="8"
+          markerHeight="8"
+          refX="6"
+          refY="3"
+          orient="auto"
+        >
+          <path d="M0,0 L6,3 L0,6 Z" fill="context-stroke" />
+        </marker>
+        <marker
+          id="conn-arrow-start"
+          markerWidth="8"
+          markerHeight="8"
+          refX="6"
+          refY="3"
+          orient="auto-start-reverse"
+        >
+          <path d="M0,0 L6,3 L0,6 Z" fill="context-stroke" />
+        </marker>
       </defs>
       {lines.map(({ c, d }) => {
         const sel = c.id === selectedId;
@@ -2080,8 +2810,18 @@ function ConnectionLines({
         return (
           <g
             key={c.id}
-            style={{ pointerEvents: readOnly ? "none" : "stroke", cursor: readOnly ? "default" : "pointer" }}
-            onPointerDown={readOnly ? undefined : (e) => { e.stopPropagation(); onSelect(c.id); }}
+            style={{
+              pointerEvents: readOnly ? "none" : "stroke",
+              cursor: readOnly ? "default" : "pointer",
+            }}
+            onPointerDown={
+              readOnly
+                ? undefined
+                : (e) => {
+                    e.stopPropagation();
+                    onSelect(c.id);
+                  }
+            }
           >
             <path d={d} fill="none" stroke="transparent" strokeWidth={16} />
             <path
@@ -2097,7 +2837,14 @@ function ConnectionLines({
         );
       })}
       {tempStart && tempEnd && (
-        <path d={connPath(tempStart, tempEnd, null)} fill="none" stroke="#6e24ff" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#conn-arrow)" />
+        <path
+          d={connPath(tempStart, tempEnd, null)}
+          fill="none"
+          stroke="#6e24ff"
+          strokeWidth={2}
+          strokeDasharray="5 4"
+          markerEnd="url(#conn-arrow)"
+        />
       )}
     </svg>
   );
@@ -2122,7 +2869,11 @@ function ConnectionOverlay({
   selectedId: string | null;
   editingId: string | null;
   onSelect: (id: string) => void;
-  onEndpointDown: (id: string, which: "from" | "to", e: React.PointerEvent) => void;
+  onEndpointDown: (
+    id: string,
+    which: "from" | "to",
+    e: React.PointerEvent,
+  ) => void;
   onBendDown: (id: string, e: React.PointerEvent) => void;
   onBendReset: (id: string) => void;
   onLabelCommit: (id: string, label: string) => void;
@@ -2136,16 +2887,34 @@ function ConnectionOverlay({
           <div key={c.id}>
             {sel && (
               <>
-                <Handle pt={p1} zoom={zoom} onPointerDown={(e) => onEndpointDown(c.id, "from", e)} />
-                <Handle pt={p2} zoom={zoom} onPointerDown={(e) => onEndpointDown(c.id, "to", e)} />
+                <Handle
+                  pt={p1}
+                  zoom={zoom}
+                  onPointerDown={(e) => onEndpointDown(c.id, "from", e)}
+                />
+                <Handle
+                  pt={p2}
+                  zoom={zoom}
+                  onPointerDown={(e) => onEndpointDown(c.id, "to", e)}
+                />
                 {/* Bend handle — drag to curve, double-click to reset straight. */}
-                {!editing && <Handle pt={handle} zoom={zoom} bend onPointerDown={(e) => onBendDown(c.id, e)} onDoubleClick={() => onBendReset(c.id)} />}
+                {!editing && (
+                  <Handle
+                    pt={handle}
+                    zoom={zoom}
+                    bend
+                    onPointerDown={(e) => onBendDown(c.id, e)}
+                    onDoubleClick={() => onBendReset(c.id)}
+                  />
+                )}
               </>
             )}
             {(editing || c.label) && (
               <div
                 className="absolute left-0 top-0 z-[6]"
-                style={{ transform: `translate(${handle.x}px, ${handle.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+                style={{
+                  transform: `translate(${handle.x}px, ${handle.y}px) translate(-50%, -50%) scale(${1 / zoom})`,
+                }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {editing ? (
@@ -2155,15 +2924,24 @@ function ConnectionOverlay({
                     placeholder="Label"
                     onBlur={(e) => onLabelCommit(c.id, e.target.value.trim())}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      if (e.key === "Escape") onLabelCommit(c.id, c.label ?? "");
+                      if (e.key === "Enter")
+                        (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape")
+                        onLabelCommit(c.id, c.label ?? "");
                     }}
                     className="w-28 rounded-md border-2 border-primary bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 outline-none"
                   />
                 ) : readOnly ? (
-                  <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{c.label}</span>
+                  <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
+                    {c.label}
+                  </span>
                 ) : (
-                  <button onClick={() => onSelect(c.id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{c.label}</button>
+                  <button
+                    onClick={() => onSelect(c.id)}
+                    className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm"
+                  >
+                    {c.label}
+                  </button>
                 )}
               </div>
             )}
@@ -2174,13 +2952,27 @@ function ConnectionOverlay({
   );
 }
 
-function Handle({ pt, zoom, bend, onPointerDown, onDoubleClick }: { pt: Pt; zoom: number; bend?: boolean; onPointerDown: (e: React.PointerEvent) => void; onDoubleClick?: () => void }) {
+function Handle({
+  pt,
+  zoom,
+  bend,
+  onPointerDown,
+  onDoubleClick,
+}: {
+  pt: Pt;
+  zoom: number;
+  bend?: boolean;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onDoubleClick?: () => void;
+}) {
   return (
     <div
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
       className={`absolute left-0 top-0 z-[7] cursor-grab rounded-full border-2 shadow active:cursor-grabbing ${bend ? "h-3 w-3 border-primary bg-primary/30" : "h-3.5 w-3.5 border-primary bg-white"}`}
-      style={{ transform: `translate(${pt.x}px, ${pt.y}px) translate(-50%, -50%) scale(${1 / zoom})` }}
+      style={{
+        transform: `translate(${pt.x}px, ${pt.y}px) translate(-50%, -50%) scale(${1 / zoom})`,
+      }}
     />
   );
 }
@@ -2189,45 +2981,93 @@ function Handle({ pt, zoom, bend, onPointerDown, onDoubleClick }: { pt: Pt; zoom
 // with an option to remember the answer.
 // Asks whether an embeddable provider URL should be a link card (with a live preview) or a bare
 // embed, with an option to remember.
-function EmbedChoiceModal({ embed, onPick, onClose }: { embed: string; onPick: (kind: "link" | "embed", remember: boolean) => void; onClose: () => void }) {
+function EmbedChoiceModal({
+  embed,
+  onPick,
+  onClose,
+}: {
+  embed: string;
+  onPick: (kind: "link" | "embed", remember: boolean) => void;
+  onClose: () => void;
+}) {
   const [remember, setRemember] = useState(false);
   return (
     <Modal open onClose={onClose} title="Link or embed?">
-      <iframe src={embed} title="preview" className="h-40 w-full rounded-lg border-2 border-slate-100" style={{ border: 0 }} sandbox="allow-scripts allow-same-origin allow-popups allow-presentation" />
+      <iframe
+        src={embed}
+        title="preview"
+        className="h-40 w-full rounded-lg border-2 border-slate-100"
+        style={{ border: 0 }}
+        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+      />
       <div className="flex gap-2">
         <Button className="flex-1" onClick={() => onPick("link", remember)}>
           <Icon.LinkIcon className="text-base" /> Link + preview
         </Button>
-        <Button variant="ghost" className="flex-1 border-2 border-slate-200" onClick={() => onPick("embed", remember)}>
+        <Button
+          variant="ghost"
+          className="flex-1 border-2 border-slate-200"
+          onClick={() => onPick("embed", remember)}
+        >
           <Icon.EmbedIcon className="text-base" /> Embed
         </Button>
       </div>
       <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-2 border-slate-300 accent-primary" />
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+          className="h-4 w-4 rounded border-2 border-slate-300 accent-primary"
+        />
         Remember my choice
       </label>
     </Modal>
   );
 }
 
-function UrlChoiceModal({ preview, onPick, onClose }: { preview: Unfurl; onPick: (kind: "image" | "link", remember: boolean) => void; onClose: () => void }) {
+function UrlChoiceModal({
+  preview,
+  onPick,
+  onClose,
+}: {
+  preview: Unfurl;
+  onPick: (kind: "image" | "link", remember: boolean) => void;
+  onClose: () => void;
+}) {
   const [remember, setRemember] = useState(false);
   return (
     <Modal open onClose={onClose} title="Add as image or link?">
       {preview.imageUrl && (
-        <img src={preview.imageUrl} alt="" className="max-h-40 w-full rounded-lg border-2 border-slate-100 object-cover" />
+        <img
+          src={preview.imageUrl}
+          alt=""
+          className="max-h-40 w-full rounded-lg border-2 border-slate-100 object-cover"
+        />
       )}
-      {preview.title && <p className="truncate text-xs font-bold text-slate-600">{preview.title}</p>}
+      {preview.title && (
+        <p className="truncate text-xs font-bold text-slate-600">
+          {preview.title}
+        </p>
+      )}
       <div className="flex gap-2">
         <Button className="flex-1" onClick={() => onPick("image", remember)}>
           <Icon.ImageIcon className="text-base" /> Image
         </Button>
-        <Button variant="ghost" className="flex-1 border-2 border-slate-200" onClick={() => onPick("link", remember)}>
+        <Button
+          variant="ghost"
+          className="flex-1 border-2 border-slate-200"
+          onClick={() => onPick("link", remember)}
+        >
           <Icon.LinkIcon className="text-base" /> Link
         </Button>
       </div>
       <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-2 border-slate-300 accent-primary" />
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+          className="h-4 w-4 rounded border-2 border-slate-300 accent-primary"
+        />
         Remember my choice
       </label>
     </Modal>
@@ -2251,14 +3091,19 @@ function htmlVisibleText(html: string): string {
   try {
     const doc = new DOMParser().parseFromString(html, "text/html");
     doc.querySelectorAll("script, style, iframe").forEach((n) => n.remove());
-    return (doc.body?.textContent ?? "").replace(/\s+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+    return (doc.body?.textContent ?? "")
+      .replace(/\s+\n/g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
   } catch {
     return "";
   }
 }
 
 // All droppable items in a clipboard text/html payload, in document order (Milanote multi-select).
-function parseClipboardHtmlAll(html: string): { kind: "iframe" | "img" | "link"; value: string }[] {
+function parseClipboardHtmlAll(
+  html: string,
+): { kind: "iframe" | "img" | "link"; value: string }[] {
   if (!html) return [];
   let doc: Document;
   try {
@@ -2285,7 +3130,11 @@ function parseClipboardHtmlAll(html: string): { kind: "iframe" | "img" | "link";
 }
 
 function escapeText(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function siteName(url: string): string {
@@ -2293,7 +3142,8 @@ function siteName(url: string): string {
     const host = new URL(url).hostname.replace(/^www\./, "");
     const parts = host.split(".");
     let idx = parts.length - 2;
-    if (parts.length > 2 && TWO_LEVEL_TLD.has(parts[parts.length - 2]!)) idx = parts.length - 3;
+    if (parts.length > 2 && TWO_LEVEL_TLD.has(parts[parts.length - 2]!))
+      idx = parts.length - 3;
     const name = parts[idx] ?? host;
     return name.charAt(0).toUpperCase() + name.slice(1);
   } catch {
@@ -2305,7 +3155,8 @@ function siteName(url: string): string {
 function loadImageSize(url: string): Promise<{ w: number; h: number }> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve({ w: img.naturalWidth || 4, h: img.naturalHeight || 3 });
+    img.onload = () =>
+      resolve({ w: img.naturalWidth || 4, h: img.naturalHeight || 3 });
     img.onerror = () => resolve({ w: 4, h: 3 });
     img.src = url;
   });
@@ -2328,7 +3179,21 @@ function isImageUrl(u: string): boolean {
 // Yjs). stopPropagation so editing doesn't drag the card; "Add a caption" placeholder when empty.
 // On focus it registers as the active editor + signals caption-editing so the rail shows the
 // note-style text-formatting tools.
-function CaptionField({ html, editing, readOnly, onText, onRegister, onFocusCaption }: { html: string; editing: boolean; readOnly?: boolean; onText: (html: string) => void; onRegister: (e: ActiveEditor) => void; onFocusCaption: () => void }) {
+function CaptionField({
+  html,
+  editing,
+  readOnly,
+  onText,
+  onRegister,
+  onFocusCaption,
+}: {
+  html: string;
+  editing: boolean;
+  readOnly?: boolean;
+  onText: (html: string) => void;
+  onRegister: (e: ActiveEditor) => void;
+  onFocusCaption: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   // Editable only on a writable board AND once the card is in edit mode (the second click).
   const active = editing && !readOnly;
@@ -2344,7 +3209,8 @@ function CaptionField({ html, editing, readOnly, onText, onRegister, onFocusCapt
   });
   // Focus the caption when the card enters edit mode (second click), mirroring a note.
   useEffect(() => {
-    if (active && ref.current && document.activeElement !== ref.current) ref.current.focus();
+    if (active && ref.current && document.activeElement !== ref.current)
+      ref.current.focus();
   }, [active]);
   return (
     <div
@@ -2355,7 +3221,9 @@ function CaptionField({ html, editing, readOnly, onText, onRegister, onFocusCapt
       className="note-editable border-t-2 border-slate-100 p-2 text-xs text-slate-700 outline-none"
       // While editing keep the caret from dragging the card; otherwise let the pointer bubble so the
       // first click selects and the second enters edit mode.
-      onPointerDown={active ? (e: React.PointerEvent) => e.stopPropagation() : undefined}
+      onPointerDown={
+        active ? (e: React.PointerEvent) => e.stopPropagation() : undefined
+      }
       onClick={(e) => {
         // A click on a link inside the caption opens it instead of selecting/editing the card.
         const a = (e.target as HTMLElement).closest("a");
@@ -2367,7 +3235,10 @@ function CaptionField({ html, editing, readOnly, onText, onRegister, onFocusCapt
         }
       }}
       onFocus={() => {
-        onRegister({ el: ref.current!, commit: () => onText(sanitizeHtml(ref.current!.innerHTML)) });
+        onRegister({
+          el: ref.current!,
+          commit: () => onText(sanitizeHtml(ref.current!.innerHTML)),
+        });
         onFocusCaption();
       }}
       onInput={() => onText(sanitizeHtml(ref.current!.innerHTML))}
@@ -2378,10 +3249,21 @@ function CaptionField({ html, editing, readOnly, onText, onRegister, onFocusCapt
 // Checklist body: optional title + checkable, editable items. Enter adds an item below; Backspace
 // on an empty item removes it. Every change patches the whole items array into the Yjs element.
 type Todo = Extract<Element, { type: "todo" }>;
-function TodoBody({ el, editing, readOnly, onChange }: { el: Todo; editing: boolean; readOnly?: boolean; onChange: (patch: { title?: string; items?: TodoItem[] }) => void }) {
+function TodoBody({
+  el,
+  editing,
+  readOnly,
+  onChange,
+}: {
+  el: Todo;
+  editing: boolean;
+  readOnly?: boolean;
+  onChange: (patch: { title?: string; items?: TodoItem[] }) => void;
+}) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const titleRef = useRef<HTMLInputElement>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [dragItem, setDragItem] = useState<string | null>(null);
   // Interactive only on a writable board AND once the card is in edit mode (the second click).
   const active = editing && !readOnly;
 
@@ -2395,12 +3277,17 @@ function TodoBody({ el, editing, readOnly, onChange }: { el: Todo; editing: bool
   // Entering edit mode (the second click) focuses the title, mirroring how a note focuses on its
   // second click. Until then the body is non-interactive so the first click only selects the card.
   useEffect(() => {
-    if (active && document.activeElement !== titleRef.current) titleRef.current?.focus();
+    if (active && document.activeElement !== titleRef.current)
+      titleRef.current?.focus();
   }, [active]);
 
   const setItems = (items: TodoItem[]) => onChange({ items });
-  const toggle = (id: string) => setItems(el.items.map((it) => (it.id === id ? { ...it, done: !it.done } : it)));
-  const setText = (id: string, text: string) => setItems(el.items.map((it) => (it.id === id ? { ...it, text } : it)));
+  const toggle = (id: string) =>
+    setItems(
+      el.items.map((it) => (it.id === id ? { ...it, done: !it.done } : it)),
+    );
+  const setText = (id: string, text: string) =>
+    setItems(el.items.map((it) => (it.id === id ? { ...it, text } : it)));
   const addAfter = (idx: number) => {
     const nid = crypto.randomUUID();
     const items = [...el.items];
@@ -2416,10 +3303,50 @@ function TodoBody({ el, editing, readOnly, onChange }: { el: Todo; editing: bool
   };
   const stop = (e: React.PointerEvent) => e.stopPropagation();
 
+  // Drag an item by its grip to reorder within the to-do — live, as the cursor moves.
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemsLatest = useRef(el.items);
+  itemsLatest.current = el.items;
+  const startItemDrag = (id: string, e: React.PointerEvent) => {
+    if (!active) return;
+    e.stopPropagation();
+    setDragItem(id);
+    const move = (ev: PointerEvent) => {
+      const rows = Array.from(
+        listRef.current?.querySelectorAll<HTMLElement>("[data-todo-item]") ??
+          [],
+      );
+      let target = rows.length - 1;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i]!.getBoundingClientRect();
+        if (ev.clientY < r.top + r.height / 2) {
+          target = i;
+          break;
+        }
+      }
+      const items = itemsLatest.current;
+      const from = items.findIndex((it) => it.id === id);
+      if (from < 0 || from === target) return;
+      const next = [...items];
+      const [moved] = next.splice(from, 1);
+      next.splice(target, 0, moved!);
+      setItems(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDragItem(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   return (
     // While not editing the body is non-interactive (pointer-events-none) so a click falls through
     // to the card: the first click selects, the second enters edit mode (then this turns back on).
-    <div className={`flex w-full flex-col gap-1 p-2 ${active ? "" : "pointer-events-none"}`}>
+    <div
+      className={`flex w-full flex-col gap-2 p-2 ${active ? "" : "pointer-events-none"}`}
+    >
       <input
         ref={titleRef}
         value={el.title ?? ""}
@@ -2429,9 +3356,13 @@ function TodoBody({ el, editing, readOnly, onChange }: { el: Todo; editing: bool
         placeholder={readOnly ? "" : "To-do"}
         className="bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400"
       />
-      <div className="grid gap-0.5">
+      <div ref={listRef} className="grid gap-1.5">
         {el.items.map((it, idx) => (
-          <div key={it.id} className="flex items-center gap-2">
+          <div
+            key={it.id}
+            data-todo-item={it.id}
+            className={`group/item flex items-center gap-2 ${dragItem === it.id ? "opacity-50" : ""}`}
+          >
             <button
               onPointerDown={stop}
               onClick={() => active && toggle(it.id)}
@@ -2460,11 +3391,25 @@ function TodoBody({ el, editing, readOnly, onChange }: { el: Todo; editing: bool
               placeholder={readOnly ? "" : "Item"}
               className={`flex-1 bg-transparent text-xs outline-none placeholder:text-slate-300 ${it.done ? "text-slate-400 line-through" : "text-slate-700"}`}
             />
+            {active && (
+              <button
+                onPointerDown={(e) => startItemDrag(it.id, e)}
+                aria-label="Reorder"
+                title="Drag to reorder"
+                className="shrink-0 cursor-grab text-slate-300 opacity-0 hover:text-slate-500 group-hover/item:opacity-100 active:cursor-grabbing"
+              >
+                <Icon.GripIcon className="text-sm" />
+              </button>
+            )}
           </div>
         ))}
       </div>
       {active && (
-        <button onPointerDown={stop} onClick={() => addAfter(el.items.length - 1)} className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-primary">
+        <button
+          onPointerDown={stop}
+          onClick={() => addAfter(el.items.length - 1)}
+          className="mt-1 flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-primary"
+        >
           <Icon.PlusIcon className="text-xs" /> Add item
         </button>
       )}
@@ -2549,7 +3494,8 @@ function ElementCard({
   const isText = el.type === "note" || el.type === "text";
   // Element types with an inline editable text zone — these enter edit mode on the second click
   // (first click just selects), same as a note. Images only when their caption is shown.
-  const editsText = isText || el.type === "todo" || (el.type === "image" && !!el.showCaption);
+  const editsText =
+    isText || el.type === "todo" || (el.type === "image" && !!el.showCaption);
 
   // Report rendered height so connection endpoints anchor to the real card edge (auto-height cards).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -2562,6 +3508,21 @@ function ElementCard({
     ro.observe(node);
     return () => ro.disconnect();
   }, [el.id, onSize]);
+
+  // Track whether the note's text overflows its (fixed-height) card, to show the bottom fade.
+  const noteWrapRef = useRef<HTMLDivElement>(null);
+  const [noteOverflowing, setNoteOverflowing] = useState(false);
+  const noteText = el.type === "note" || el.type === "text" ? el.text : "";
+  useEffect(() => {
+    const ed = noteWrapRef.current?.firstElementChild as HTMLElement | null;
+    if (!ed) return;
+    const check = () =>
+      setNoteOverflowing(ed.scrollHeight - ed.clientHeight > 2);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(ed);
+    return () => ro.disconnect();
+  }, [noteText, el.h, editing]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation(); // don't let the canvas deselect / pan
@@ -2606,7 +3567,13 @@ function ElementCard({
       onOpen();
       return;
     }
-    if (editsText && !readOnly && !justSelected.current && !editing && !dragged.current)
+    if (
+      editsText &&
+      !readOnly &&
+      !justSelected.current &&
+      !editing &&
+      !dragged.current
+    )
       onEdit();
   };
   // Non-text elements (e.g. links) open on double-click.
@@ -2622,18 +3589,32 @@ function ElementCard({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   // Links are content-height (toggling preview/caption resizes the card), so resize is width-only.
-  const autoSize = embedded || el.type === "link" || el.type === "image" || el.type === "todo" || el.type === "column"; // content-height
+  const autoSize =
+    embedded ||
+    el.type === "link" ||
+    el.type === "image" ||
+    el.type === "todo" ||
+    el.type === "column"; // content-height
   const lockAspect = el.type === "image"; // resize keeps the image's aspect ratio
   const onResizeMove = (e: React.PointerEvent) => {
     if (!size.current) return;
-    const w = Math.max(80, Math.round(size.current.w + (e.clientX - size.current.x) / zoom));
+    const w = Math.max(
+      80,
+      Math.round(size.current.w + (e.clientX - size.current.x) / zoom),
+    );
     if (lockAspect) {
       const aspect = size.current.w / size.current.h || 1;
       onResize(w, Math.max(40, Math.round(w / aspect)));
     } else if (autoSize) {
       onResize(w, el.h);
     } else {
-      onResize(w, Math.max(60, Math.round(size.current.h + (e.clientY - size.current.y) / zoom)));
+      onResize(
+        w,
+        Math.max(
+          60,
+          Math.round(size.current.h + (e.clientY - size.current.y) / zoom),
+        ),
+      );
     }
   };
   const endResize = () => (size.current = null);
@@ -2661,13 +3642,14 @@ function ElementCard({
       onDoubleClick={onDoubleClick}
       // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
-      className={`${embedded ? "relative mb-2 w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
+      className={`${embedded ? "relative w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-200"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
       style={{
         left: embedded ? undefined : el.x,
         top: embedded ? undefined : el.y,
         width: embedded ? undefined : el.w,
         height: autoSize ? "auto" : el.h,
-        background: isText || el.type === "todo" ? (s.fill ?? "#ffffff") : "#fff",
+        background:
+          isText || el.type === "todo" ? (s.fill ?? "#ffffff") : "#fff",
         zIndex: dragging ? 1000 : undefined,
         transform: shrink ? "scale(0.4)" : undefined,
         transformOrigin: "center",
@@ -2682,7 +3664,7 @@ function ElementCard({
               style={{ background: s.strip }}
             />
           )}
-          <div className="min-h-0 flex-1">
+          <div ref={noteWrapRef} className="min-h-0 flex-1">
             <EditableNote
               id={el.id}
               html={el.type === "note" || el.type === "text" ? el.text : ""}
@@ -2692,26 +3674,59 @@ function ElementCard({
               onRegister={onRegister}
             />
           </div>
-          {/* Fade overflowing text out at the bottom (in the note's own colour) when not editing. */}
-          {!editing && (
+          {/* Fade overflowing text out at the bottom (note's own colour) — only when truncated. */}
+          {!editing && noteOverflowing && (
             <div
               className="pointer-events-none absolute inset-x-0 bottom-0 h-8"
-              style={{ background: `linear-gradient(to bottom, transparent, ${s.fill ?? "#ffffff"})` }}
+              style={{
+                background: `linear-gradient(to bottom, transparent, ${s.fill ?? "#ffffff"})`,
+              }}
             />
           )}
         </div>
       ) : el.type === "image" ? (
         <div className="flex w-full flex-col overflow-hidden bg-white">
-          {el.style?.strip && <div className="h-2.5 w-full shrink-0" style={{ background: el.style.strip }} />}
+          {el.style?.strip && (
+            <div
+              className="h-2.5 w-full shrink-0"
+              style={{ background: el.style.strip }}
+            />
+          )}
           {/* Embedded (in a column): height follows the column width via aspect ratio. Free: fixed h. */}
           {imgUrl ? (
-            <img src={imgUrl} alt={el.alt ?? ""} className="w-full object-cover" style={embedded ? { aspectRatio: `${el.w} / ${el.h}` } : { height: el.h }} draggable={false} />
+            <img
+              src={imgUrl}
+              alt={el.alt ?? ""}
+              className="w-full object-cover"
+              style={
+                embedded
+                  ? { aspectRatio: `${el.w} / ${el.h}` }
+                  : { height: el.h }
+              }
+              draggable={false}
+            />
           ) : (
-            <div className="grid place-items-center text-slate-400" style={embedded ? { aspectRatio: `${el.w} / ${el.h}` } : { height: el.h }}>
+            <div
+              className="grid place-items-center text-slate-400"
+              style={
+                embedded
+                  ? { aspectRatio: `${el.w} / ${el.h}` }
+                  : { height: el.h }
+              }
+            >
               image…
             </div>
           )}
-          {el.showCaption && <CaptionField html={el.caption ?? ""} editing={editing} readOnly={readOnly} onText={(h) => onCaption?.(h)} onRegister={onRegister} onFocusCaption={() => onCaptionFocus?.()} />}
+          {el.showCaption && (
+            <CaptionField
+              html={el.caption ?? ""}
+              editing={editing}
+              readOnly={readOnly}
+              onText={(h) => onCaption?.(h)}
+              onRegister={onRegister}
+              onFocusCaption={() => onCaptionFocus?.()}
+            />
+          )}
         </div>
       ) : el.type === "link" ? (
         <div
@@ -2725,19 +3740,29 @@ function ElementCard({
             />
           )}
           {el.embedSrc ? (
-            <div className="relative w-full" style={{ height: embedHeightFor(el.embedSrc, el.w) }}>
+            <div
+              className="relative w-full"
+              style={{ height: embedHeightFor(el.embedSrc, el.w) }}
+            >
               <iframe
                 src={el.embedSrc}
                 title="embed"
                 className="h-full w-full"
-                style={{ border: 0, pointerEvents: selected && !readOnly && !freshlyCreated ? "auto" : "none" }}
+                style={{
+                  border: 0,
+                  pointerEvents:
+                    selected && !readOnly && !freshlyCreated ? "auto" : "none",
+                }}
                 sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
                 allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
               />
-              {!(selected && !readOnly && !freshlyCreated) && <div className="absolute inset-0" />}
+              {!(selected && !readOnly && !freshlyCreated) && (
+                <div className="absolute inset-0" />
+              )}
             </div>
           ) : (
-            el.image && !el.hideImage && (
+            el.image &&
+            !el.hideImage && (
               <img
                 src={el.image}
                 alt=""
@@ -2764,48 +3789,101 @@ function ElementCard({
               </div>
             )}
             <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
-              {faviconUrl(el.url) && <img src={faviconUrl(el.url)!} alt="" width={12} height={12} className="shrink-0 rounded-sm" draggable={false} />}
+              {faviconUrl(el.url) && (
+                <img
+                  src={faviconUrl(el.url)!}
+                  alt=""
+                  width={12}
+                  height={12}
+                  className="shrink-0 rounded-sm"
+                  draggable={false}
+                />
+              )}
               <span className="truncate">{linkHost(el.url)}</span>
             </div>
           </div>
         </div>
       ) : el.type === "todo" ? (
         <div className="flex w-full flex-col overflow-hidden">
-          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
-          <TodoBody el={el} editing={editing} readOnly={readOnly} onChange={(p) => onTodo?.(p)} />
+          {s.strip && (
+            <div
+              className="h-2.5 w-full shrink-0"
+              style={{ background: s.strip }}
+            />
+          )}
+          <TodoBody
+            el={el}
+            editing={editing}
+            readOnly={readOnly}
+            onChange={(p) => onTodo?.(p)}
+          />
         </div>
       ) : el.type === "board" ? (
         <div className="flex h-full w-full flex-col overflow-hidden">
-          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-3 text-center">
+          {s.strip && (
+            <div
+              className="h-2.5 w-full shrink-0"
+              style={{ background: s.strip }}
+            />
+          )}
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 py-4 text-center">
             <Icon.BoardIcon className="text-3xl text-primary" />
-            <span className="line-clamp-2 text-xs font-bold text-slate-700">{el.title || "Board"}</span>
-            <span className="text-[10px] font-bold text-slate-400">Double-click to open</span>
+            <span className="line-clamp-2 text-xs font-bold text-slate-700">
+              {el.title || "Board"}
+            </span>
+            <span className="text-[10px] font-bold text-slate-400">
+              Double-click to open
+            </span>
           </div>
         </div>
       ) : el.type === "embed" ? (
         <div className="relative flex h-full w-full flex-col overflow-hidden">
-          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+          {s.strip && (
+            <div
+              className="h-2.5 w-full shrink-0"
+              style={{ background: s.strip }}
+            />
+          )}
           <iframe
             src={el.src}
             title="embed"
             className="min-h-0 w-full flex-1"
-            style={{ border: 0, pointerEvents: selected && !readOnly && !freshlyCreated ? "auto" : "none" }}
+            style={{
+              border: 0,
+              pointerEvents:
+                selected && !readOnly && !freshlyCreated ? "auto" : "none",
+            }}
             sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
             allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
           />
           {/* Swallow pointer events unless interactive, so the card can be dragged/selected
               (including right after it's dropped). */}
-          {!(selected && !readOnly && !freshlyCreated) && <div className="absolute inset-0" />}
+          {!(selected && !readOnly && !freshlyCreated) && (
+            <div className="absolute inset-0" />
+          )}
         </div>
       ) : el.type === "column" ? (
-        <div className="flex h-full w-full flex-col overflow-hidden" style={{ background: s.fill ?? "#ffffff" }}>
-          {s.strip && <div className="h-2.5 w-full shrink-0" style={{ background: s.strip }} />}
+        <div
+          className="flex w-full flex-col overflow-hidden"
+          style={{ background: s.fill ?? "#ffffff" }}
+        >
+          {s.strip && (
+            <div
+              className="h-2.5 w-full shrink-0"
+              style={{ background: s.strip }}
+            />
+          )}
           {/* Header: collapse toggle, inline title, card count. */}
           <div className="flex items-center gap-1 px-2 pt-2">
             {onToggleCollapse && (
-              <button onPointerDown={(e) => e.stopPropagation()} onClick={onToggleCollapse} className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100">
-                <Icon.ChevronDown className={`text-base transition-transform ${el.collapsed ? "-rotate-90" : ""}`} />
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={onToggleCollapse}
+                className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100"
+              >
+                <Icon.ChevronDown
+                  className={`text-base transition-transform ${el.collapsed ? "-rotate-90" : ""}`}
+                />
               </button>
             )}
             {/* Two-stage: a plain title until the column is selected, then an editable input. */}
@@ -2818,20 +3896,36 @@ function ElementCard({
                 className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-400"
               />
             ) : (
-              <span className={`min-w-0 flex-1 truncate text-sm font-bold ${el.title ? "text-slate-700" : "text-slate-400"}`}>{el.title || "Column"}</span>
+              <span
+                className={`min-w-0 flex-1 truncate text-sm font-bold ${el.title ? "text-slate-700" : "text-slate-400"}`}
+              >
+                {el.title || "Column"}
+              </span>
             )}
           </div>
-          <div className="px-2 pb-1 pl-8 text-[11px] font-bold text-slate-400">{el.children.length} {el.children.length === 1 ? "card" : "cards"}</div>
+          <div
+            className={`px-2 pl-8 text-[11px] font-bold text-slate-400 ${el.collapsed ? "pb-2" : "pb-1"}`}
+          >
+            {el.children.length} {el.children.length === 1 ? "card" : "cards"}
+          </div>
           {!el.collapsed && (
-            <div className="flex flex-col px-2 pb-2">
+            <div className="flex flex-col gap-2 p-2 pt-1">
               {el.children.map((cid, i) => (
                 <div key={cid}>
-                  {colDropIndex === i && <div className="my-0.5 h-0.5 rounded bg-primary" />}
+                  {colDropIndex === i && (
+                    <div className="my-0.5 h-0.5 rounded bg-primary" />
+                  )}
                   {renderColumnChild?.(cid)}
                 </div>
               ))}
-              {colDropIndex === el.children.length && <div className="my-0.5 h-0.5 rounded bg-primary" />}
-              {el.children.length === 0 && <div className="rounded-lg border-2 border-dashed border-slate-200 py-6 text-center text-[11px] text-slate-400">Drag cards here</div>}
+              {colDropIndex === el.children.length && (
+                <div className="my-0.5 h-0.5 rounded bg-primary" />
+              )}
+              {el.children.length === 0 && (
+                <div className="rounded-lg border-2 border-dashed border-slate-200 py-6 text-center text-[11px] text-slate-400">
+                  Drag cards here
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2852,15 +3946,15 @@ function ElementCard({
       )}
 
       {!readOnly && !embedded && (
-      <div
-        onPointerDown={startResize}
-        onPointerMove={onResizeMove}
-        onPointerUp={endResize}
-        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
-        style={{
-          background: `linear-gradient(135deg, transparent 50%, ${selected ? "#6e24ff" : "#cbd5e1"} 50%)`,
-        }}
-      />
+        <div
+          onPointerDown={startResize}
+          onPointerMove={onResizeMove}
+          onPointerUp={endResize}
+          className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
+          style={{
+            background: `linear-gradient(135deg, transparent 50%, ${selected ? "#6e24ff" : "#cbd5e1"} 50%)`,
+          }}
+        />
       )}
     </div>
   );

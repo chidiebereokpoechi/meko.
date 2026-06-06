@@ -53,7 +53,7 @@ export function EditableNote({
       contentEditable={editing}
       suppressContentEditableWarning
       data-empty-placeholder="Start typing..."
-      className="note-editable h-full w-full overflow-auto p-4 outline-none"
+      className="note-editable h-full w-full overflow-auto p-2 outline-none"
       style={style}
       onFocus={() =>
         onRegister({
