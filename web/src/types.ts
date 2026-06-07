@@ -90,3 +90,10 @@ export interface Workspace {
   id: string;
   name: string;
 }
+
+// The authenticated account (GET /api/auth/me).
+export interface CurrentUser {
+  id: string;
+  email: string;
+  displayName: string;
+}

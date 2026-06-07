@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client.ts";
 import { users } from "@/db/schema.ts";
 import { securityEvent } from "@/lib/logger.ts";
+import { SignupClosedError, canCreateAccount } from "@/auth/signup-policy.ts";
 import type { OidcClaims } from "@/auth/oidc.ts";
 
 // Just-in-time provisioning of a meko user from verified OIDC claims. The IdP's `sub` is the stable
@@ -32,7 +33,12 @@ export async function provisionOidcUser(claims: OidcClaims): Promise<string> {
     return byEmail.id;
   }
 
-  // 3. Brand-new user. Guard the unique(oidc_sub) race: on a conflicting insert, re-read by sub.
+  // 3. Brand-new user — subject to the signup policy (invite-only / bootstrap allowlist).
+  if (!(await canCreateAccount(claims.email))) {
+    securityEvent("auth.signup_blocked", { email: claims.email, via: "oidc" });
+    throw new SignupClosedError("SIGNUP_CLOSED");
+  }
+  // Guard the unique(oidc_sub) race: on a conflicting insert, re-read by sub.
   try {
     const [u] = await db
       .insert(users)

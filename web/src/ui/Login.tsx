@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { API, login, signup } from "../lib/auth.ts";
+import { API, login } from "../lib/auth.ts";
 import { Button, TextField } from "./kit/index.ts";
 
 // Map the callback's ?auth_error code (set on a failed OIDC round trip) to a human message.
 const OIDC_ERRORS: Record<string, string> = {
   email_unverified: "Your Google email isn't verified, so it can't be linked to an existing account.",
   access_denied: "Google sign-in was cancelled.",
+  signup_closed: "meko. is invite-only — ask an admin to invite your email.",
 };
 function readOidcError(): string | null {
   const code = new URLSearchParams(window.location.search).get("auth_error");
@@ -28,21 +29,22 @@ function GoogleG() {
 }
 
 export function Login({ onAuthed }: { onAuthed: () => void }) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [err, setErr] = useState<string | null>(() => readOidcError());
   const [busy, setBusy] = useState(false);
+  // Carry the current path (e.g. /invite/<token>) through the Google round trip so an invited user
+  // lands back on the invite after authenticating. There is no self-signup — accounts are created
+  // only when an invited (or bootstrap-allowlisted) email authenticates.
+  const oidcUrl = `${API}/api/auth/oidc/login?return=${encodeURIComponent(window.location.pathname + window.location.search)}`;
 
-  // <form onSubmit> → Enter submits.
+  // <form onSubmit> → Enter submits. Login only; no signup from this screen.
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setBusy(true);
     try {
-      if (mode === "signup") await signup(email, password, displayName || email.split("@")[0]!);
-      else await login(email, password);
+      await login(email, password);
       onAuthed();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed");
@@ -56,10 +58,10 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
       <form className="flex w-80 flex-col gap-4 rounded-xl border-2 border-slate-100 bg-white px-8 py-9" onSubmit={submit}>
         <div>
           <h1 className="heading text-2xl text-primary">meko.</h1>
-          <p className="mt-1 text-slate-400">{mode === "login" ? "Sign in to your boards" : "Create an account"}</p>
+          <p className="mt-1 text-slate-400">Sign in to your boards</p>
         </div>
         <a
-          href={`${API}/api/auth/oidc/login`}
+          href={oidcUrl}
           className="flex items-center justify-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
         >
           <GoogleG /> Continue with Google
@@ -67,9 +69,6 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
         <div className="flex items-center gap-3 text-[11px] font-bold uppercase text-slate-300">
           <span className="h-0.5 flex-1 bg-slate-100" /> or <span className="h-0.5 flex-1 bg-slate-100" />
         </div>
-        {mode === "signup" && (
-          <TextField name="displayName" label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-        )}
         <TextField name="email" type="email" label="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <TextField
           name="password"
@@ -82,11 +81,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
           error={err}
         />
         <Button type="submit" loading={busy}>
-          {mode === "login" ? "Sign in" : "Sign up"}
+          Sign in
         </Button>
-        <button type="button" className="text-xs font-bold text-primary hover:text-primary-dark" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-          {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
-        </button>
+        <p className="text-center text-xs text-slate-400">Access is invite-only. Open your invite link to join.</p>
       </form>
     </div>
   );

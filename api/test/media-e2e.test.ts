@@ -25,7 +25,7 @@ async function waitHealthy() {
 beforeAll(async () => {
   if (!LIVE) return;
   node = Bun.spawn(["bun", "run", "src/index.ts"], {
-    env: { ...process.env, PORT: String(PORT), NODE_ID: "media-e2e", LOG_LEVEL: "warn", MEKO_ALLOWED_ORIGINS: "http://localhost" },
+    env: { ...process.env, PORT: String(PORT), NODE_ID: "media-e2e", LOG_LEVEL: "warn", MEKO_ALLOWED_ORIGINS: "http://localhost", MEKO_SIGNUP_MODE: "open", MEKO_BOOTSTRAP_EMAILS: "" },
     stdout: "inherit",
     stderr: "inherit",
   });

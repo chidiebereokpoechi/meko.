@@ -6,8 +6,11 @@ import crypto from "node:crypto";
 // exchange) and JIT provisioning end to end. A live Authentik round trip stays out of CI.
 
 const NODE_PORT = 3302;
+const NODE2_PORT = 3303; // invite-only node
 const IDP_PORT = 3399;
 const BASE = `http://localhost:${NODE_PORT}`;
+const BASE2 = `http://localhost:${NODE2_PORT}`;
+const BOOTSTRAP = "bootstrap@x.test";
 const ISSUER = `http://localhost:${IDP_PORT}`;
 const WEB = "http://localhost:5999";
 const CLIENT_ID = "meko-test";
@@ -28,6 +31,7 @@ function signIdToken(claims: Record<string, unknown>): string {
 
 let idp: ReturnType<typeof Bun.serve>;
 let node: ReturnType<typeof Bun.spawn>;
+let node2: ReturnType<typeof Bun.spawn>;
 
 beforeAll(async () => {
   // Fake IdP: discovery + JWKS + token endpoint. The `code` the test sends to /callback encodes the
@@ -67,34 +71,70 @@ beforeAll(async () => {
       OIDC_CLIENT_SECRET: "test-secret",
       OIDC_REDIRECT_URI: `${BASE}/api/auth/oidc/callback`,
       MEKO_WEB_URL: WEB,
+      // Pin open mode so the suite is deterministic regardless of the developer's .env.
+      MEKO_SIGNUP_MODE: "open",
+      MEKO_BOOTSTRAP_EMAILS: "",
     },
     stdout: "inherit",
     stderr: "inherit",
   });
-  for (let i = 0; i < 60; i++) {
-    try {
-      if ((await fetch(`${BASE}/healthz`)).ok) break;
-    } catch {}
-    await Bun.sleep(250);
+  // Second node in invite-only mode (same IdP) to exercise the signup gate.
+  node2 = Bun.spawn(["bun", "run", "src/index.ts"], {
+    env: {
+      ...process.env,
+      PORT: String(NODE2_PORT),
+      NODE_ID: "oidc-invite",
+      LOG_LEVEL: "warn",
+      MEKO_ALLOWED_ORIGINS: "http://localhost",
+      OIDC_ISSUER: ISSUER,
+      OIDC_CLIENT_ID: CLIENT_ID,
+      OIDC_CLIENT_SECRET: "test-secret",
+      OIDC_REDIRECT_URI: `${BASE2}/api/auth/oidc/callback`,
+      MEKO_WEB_URL: WEB,
+      MEKO_SIGNUP_MODE: "invite",
+      MEKO_BOOTSTRAP_EMAILS: BOOTSTRAP,
+    },
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  for (const base of [BASE, BASE2]) {
+    for (let i = 0; i < 60; i++) {
+      try {
+        if ((await fetch(`${base}/healthz`)).ok) break;
+      } catch {}
+      await Bun.sleep(250);
+    }
   }
 });
 
 afterAll(() => {
   node?.kill();
+  node2?.kill();
   idp?.stop(true);
 });
 
 const ip = (n: string) => ({ "x-forwarded-for": n });
 
 // Drive /login (without following redirects), returning the authorize params + the tx cookie.
-async function startLogin(xff: string) {
-  const res = await fetch(`${BASE}/api/auth/oidc/login`, { headers: ip(xff), redirect: "manual" });
+async function startLogin(xff: string, base = BASE, returnPath?: string) {
+  const q = returnPath ? `?return=${encodeURIComponent(returnPath)}` : "";
+  const res = await fetch(`${base}/api/auth/oidc/login${q}`, { headers: ip(xff), redirect: "manual" });
   expect(res.status).toBe(302);
   const loc = new URL(res.headers.get("location")!);
   expect(loc.origin + loc.pathname).toBe(`${ISSUER}/authorize`);
   expect(loc.searchParams.get("code_challenge_method")).toBe("S256");
   const txCookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
   return { state: loc.searchParams.get("state")!, nonce: loc.searchParams.get("nonce")!, txCookie };
+}
+
+// Run a full login round trip and return the callback Response (unfollowed redirect).
+async function login(base: string, xff: string, claims: Record<string, unknown>, returnPath?: string) {
+  const { state, nonce, txCookie } = await startLogin(xff, base, returnPath);
+  const code = b64url(JSON.stringify({ email_verified: true, nonce, ...claims }));
+  return fetch(`${base}/api/auth/oidc/callback?code=${code}&state=${state}`, {
+    headers: { ...ip(xff), cookie: txCookie },
+    redirect: "manual",
+  });
 }
 
 test("happy path: login → callback provisions user, issues meko refresh cookie, redirects to web", async () => {
@@ -107,7 +147,7 @@ test("happy path: login → callback provisions user, issues meko refresh cookie
     redirect: "manual",
   });
   expect(res.status).toBe(302);
-  expect(res.headers.get("location")).toBe(WEB);
+  expect(res.headers.get("location")).toBe(`${WEB}/`);
   const setCookie = res.headers.get("set-cookie") ?? "";
   expect(setCookie).toContain("refresh_token=");
   expect(setCookie).toContain("HttpOnly");
@@ -145,8 +185,34 @@ test("returning user (same sub) reuses the same account", async () => {
       redirect: "manual",
     });
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(WEB);
+    expect(res.headers.get("location")).toBe(`${WEB}/`);
   };
   await run("11.0.0.4");
   await run("11.0.0.5"); // second login, same sub — must not error on the unique(oidc_sub) index
+});
+
+test("invite mode: a non-allowlisted new email is blocked with auth_error=signup_closed", async () => {
+  const res = await login(BASE2, "11.0.0.6", { sub: `nope-${Date.now()}`, email: `stranger_${Date.now()}@x.test`, name: "Stranger" });
+  expect(res.status).toBe(302);
+  expect(res.headers.get("location")).toBe(`${WEB}/?auth_error=signup_closed`);
+  expect(res.headers.get("set-cookie") ?? "").not.toContain("refresh_token=");
+});
+
+test("invite mode: a bootstrap-allowlisted email may create an account", async () => {
+  const res = await login(BASE2, "11.0.0.7", { sub: `boot-${Date.now()}`, email: BOOTSTRAP, name: "Boot" });
+  expect(res.status).toBe(302);
+  expect(res.headers.get("location")).toBe(`${WEB}/`);
+  expect(res.headers.get("set-cookie") ?? "").toContain("refresh_token=");
+});
+
+test("return path survives the round trip (invite link → Google → back to invite)", async () => {
+  const res = await login(BASE, "11.0.0.8", { sub: `ret-${Date.now()}`, email: `ret_${Date.now()}@x.test`, name: "Ret" }, "/invite/abc123");
+  expect(res.status).toBe(302);
+  expect(res.headers.get("location")).toBe(`${WEB}/invite/abc123`);
+});
+
+test("open-redirect return paths are rejected (fall back to /)", async () => {
+  const res = await login(BASE, "11.0.0.9", { sub: `evil-${Date.now()}`, email: `evil_${Date.now()}@x.test`, name: "Evil" }, "//evil.example.com");
+  expect(res.status).toBe(302);
+  expect(res.headers.get("location")).toBe(`${WEB}/`);
 });

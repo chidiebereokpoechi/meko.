@@ -60,7 +60,10 @@ export async function signup(email: string, password: string, displayName: strin
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password, displayName }),
   });
-  if (!res.ok) throw new Error(res.status === 409 ? "Email already registered" : "Signup failed");
+  if (!res.ok)
+    throw new Error(
+      res.status === 409 ? "Email already registered" : res.status === 403 ? "meko. is invite-only — ask an admin to invite your email." : "Signup failed",
+    );
   accessToken = ((await res.json()) as { accessToken: string }).accessToken;
 }
 

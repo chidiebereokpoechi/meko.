@@ -27,7 +27,7 @@ async function waitHealthy() {
 
 beforeAll(async () => {
   node = Bun.spawn(["bun", "run", "src/index.ts"], {
-    env: { ...process.env, PORT: String(PORT), NODE_ID: "auth", LOG_LEVEL: "warn", MEKO_ALLOWED_ORIGINS: "http://localhost" },
+    env: { ...process.env, PORT: String(PORT), NODE_ID: "auth", LOG_LEVEL: "warn", MEKO_ALLOWED_ORIGINS: "http://localhost", MEKO_SIGNUP_MODE: "open", MEKO_BOOTSTRAP_EMAILS: "" },
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -52,6 +52,22 @@ test("signup issues access token + refresh cookie", async () => {
   expect(raw).toContain("HttpOnly");
   expect(raw).toContain("SameSite=Strict");
   expect(raw).toContain("Path=/api/auth");
+});
+
+test("GET /api/auth/me returns the bearer's identity (401 without a token)", async () => {
+  const e = email();
+  const signup = await fetch(`${BASE}/api/auth/signup`, { method: "POST", headers: hdr("10.0.0.7"), body: JSON.stringify({ email: e, password: "supersecret", displayName: "Mimi" }) });
+  const { accessToken } = await signup.json();
+
+  const me = await fetch(`${BASE}/api/auth/me`, { headers: { authorization: `Bearer ${accessToken}` } });
+  expect(me.status).toBe(200);
+  const body = await me.json();
+  expect(body.email).toBe(e);
+  expect(body.displayName).toBe("Mimi");
+  expect(body.id).toBeString();
+
+  const anon = await fetch(`${BASE}/api/auth/me`);
+  expect(anon.status).toBe(401);
 });
 
 test("login with wrong password is 401", async () => {

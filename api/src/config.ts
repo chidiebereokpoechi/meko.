@@ -40,6 +40,14 @@ const Env = z.object({
   // Where the OIDC callback sends the browser after a successful login (the SPA origin).
   MEKO_WEB_URL: z.string().url().default("http://localhost:5173"),
 
+  // Account-creation policy. "open" = anyone who authenticates gets an account (default).
+  // "invite" = a new account is created only for an email with a pending workspace invite (or one
+  // listed in MEKO_BOOTSTRAP_EMAILS). Existing users always log in regardless. Gates BOTH the OIDC
+  // path and password /signup.
+  MEKO_SIGNUP_MODE: z.enum(["open", "invite"]).default("open"),
+  // Emails always allowed to create an account even in invite mode (bootstrap the first admin).
+  MEKO_BOOTSTRAP_EMAILS: z.string().default("").transform(csv),
+
   MEKO_MAX_BOARD_BYTES: z.coerce.number().int().positive().default(50 * 1024 * 1024),
   MEKO_SNAPSHOT_RETENTION: z.coerce.number().int().positive().default(3),
   ROUTE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),

@@ -1,6 +1,6 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { Icon } from "../kit/index.ts";
-import type { Workspace } from "../../types.ts";
+import type { CurrentUser, Workspace } from "../../types.ts";
 
 export interface ViewControls {
   zoomIn: () => void;
@@ -22,6 +22,7 @@ export function TopBar({
   crumb = [],
   onCrumb,
   onHome,
+  user,
   onLogout,
   undo,
   redo,
@@ -38,6 +39,7 @@ export function TopBar({
   crumb?: { id: string; title: string }[];
   onCrumb?: (id: string) => void;
   onHome: () => void;
+  user?: CurrentUser | null;
   onLogout: () => void;
   undo?: () => void;
   redo?: () => void;
@@ -121,9 +123,29 @@ export function TopBar({
           <Icon.SettingsIcon className="text-lg" />
         </IconBtn>
       </div>
-      <button onClick={onLogout} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-primary-dark">
-        Log out
-      </button>
+      <Menu as="div" className="relative">
+        <MenuButton className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-slate-200">
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-primary text-xs font-bold uppercase text-white">
+            {initials(user?.displayName ?? user?.email ?? "?")}
+          </span>
+          {user && <span className="max-w-[10rem] truncate text-xs font-bold text-slate-600">{user.displayName}</span>}
+          <Icon.ChevronDown className="text-base text-slate-400" />
+        </MenuButton>
+        <MenuItems className="absolute right-0 z-[90] mt-1 w-56 rounded-lg border-2 border-slate-100 bg-white p-1 shadow-lg focus:outline-none">
+          {user && (
+            <div className="px-3 py-2">
+              <p className="truncate text-sm font-bold text-slate-600">{user.displayName}</p>
+              <p className="truncate text-xs text-slate-400">{user.email}</p>
+            </div>
+          )}
+          <div className="my-1 border-t-2 border-slate-100" />
+          <MenuItem>
+            <button onClick={onLogout} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-bold text-slate-600 data-[focus]:bg-primary/10 data-[focus]:text-primary-dark">
+              <Icon.LogoutIcon className="text-base" /> Log out
+            </button>
+          </MenuItem>
+        </MenuItems>
+      </Menu>
     </header>
 
       {/* Board actions row (canvas view). */}
@@ -158,6 +180,13 @@ export function TopBar({
       )}
     </div>
   );
+}
+
+// Up to two initials from a display name (or the first char of an email).
+function initials(s: string): string {
+  const parts = s.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!);
+  return (parts[0]?.[0] ?? s[0] ?? "?");
 }
 
 function ViewItem({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {

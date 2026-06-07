@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { logout, refresh } from "./lib/auth.ts";
 import { api } from "./lib/api.ts";
-import type { Workspace } from "./types.ts";
+import type { CurrentUser, Workspace } from "./types.ts";
 import { Login } from "./ui/Login.tsx";
 import { Boards } from "./ui/Boards.tsx";
 import { Canvas, type BoardControls } from "./ui/Canvas.tsx";
@@ -18,6 +18,7 @@ type Crumb = { id: string; title: string };
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
+  const [user, setUser] = useState<CurrentUser | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceWithRole[]>([]);
   const [controls, setControls] = useState<BoardControls | null>(null);
   const [crumb, setCrumb] = useState<Crumb[]>([]);
@@ -25,21 +26,23 @@ export function App() {
   const navigate = useNavigate();
 
   const loadWorkspaces = () => api<WorkspaceWithRole[]>("/api/workspaces").then(setWorkspaces);
+  const loadUser = () => api<CurrentUser>("/api/auth/me").then(setUser).catch(() => {});
 
   useEffect(() => {
     refresh().then(async (ok) => {
       if (!ok) return setPhase("login");
-      await loadWorkspaces().catch(() => {});
+      await Promise.all([loadWorkspaces().catch(() => {}), loadUser()]);
       setPhase("ready");
     });
   }, []);
 
   if (phase === "loading") return <div className="grid h-screen place-items-center text-slate-400">Loading…</div>;
-  if (phase === "login") return <Login onAuthed={async () => { await loadWorkspaces().catch(() => {}); setPhase("ready"); }} />;
+  if (phase === "login") return <Login onAuthed={async () => { await Promise.all([loadWorkspaces().catch(() => {}), loadUser()]); setPhase("ready"); }} />;
 
   const onLogout = async () => {
     await logout();
     setWorkspaces([]);
+    setUser(null);
     setPhase("login");
     navigate("/");
   };
@@ -53,6 +56,7 @@ export function App() {
           element={
             <Shell
               workspaces={workspaces}
+              user={user}
               controls={controls}
               crumb={crumb}
               onLogout={onLogout}
@@ -87,12 +91,14 @@ export function App() {
 // Layout route: persistent top bar + the routed page.
 function Shell({
   workspaces,
+  user,
   controls,
   crumb,
   onLogout,
   onNewWorkspace,
 }: {
   workspaces: WorkspaceWithRole[];
+  user: CurrentUser | null;
   controls: BoardControls | null;
   crumb: Crumb[];
   onLogout: () => void;
@@ -112,6 +118,7 @@ function Shell({
         crumb={boardId ? crumb : []}
         onCrumb={(id) => navigate(`/w/${workspaceId}/b/${id}`)}
         onHome={() => navigate("/")}
+        user={user}
         onLogout={onLogout}
         undo={controls?.undo}
         redo={controls?.redo}

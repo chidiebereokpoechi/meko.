@@ -79,6 +79,20 @@ MEKO_WEB_URL=http://localhost:5173
 Restart the API. "Continue with Google" appears on the meko login screen. Leaving `OIDC_ISSUER`
 empty disables it (routes 404) — password login is unaffected either way.
 
+## 5. Limit who can sign up (optional)
+By default anyone who can authenticate with Google gets a meko account. To lock it down, in `api/.env`:
+
+```
+MEKO_SIGNUP_MODE=invite
+MEKO_BOOTSTRAP_EMAILS=you@example.com
+```
+
+In `invite` mode a **new** account is created only for an email that has a pending workspace invite
+(or is in `MEKO_BOOTSTRAP_EMAILS`). Existing users always log in. Applies to both Google and password
+`/signup`. Blocked Google logins land back on the meko login screen with an "invite-only" message;
+the attempt is logged as `auth.signup_blocked`. Add your own email to `MEKO_BOOTSTRAP_EMAILS` so you
+can create the first admin account, then invite everyone else from inside meko.
+
 ## Notes
 - meko links a Google login to an existing password account **only if the email is verified**
   (Google emails are). Unverified → a separate account, to block takeover.

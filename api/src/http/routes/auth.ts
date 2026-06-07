@@ -18,7 +18,8 @@ import { securityEvent } from "@/lib/logger.ts";
 import { config, oidcEnabled } from "@/config.ts";
 import { redis } from "@/lib/redis.ts";
 import { buildAuthorizeUrl, completeLogin, pkcePair, randomToken } from "@/auth/oidc.ts";
-import { provisionOidcUser } from "@/auth/provision.ts";
+import { provisionOidcUser, OidcLinkError } from "@/auth/provision.ts";
+import { SignupClosedError, canCreateAccount } from "@/auth/signup-policy.ts";
 
 // Read a named cookie value from a Cookie header — never the body or a non-cookie header (§9g).
 function readCookie(cookieHeader: string | null, name: string): string | null {
@@ -42,7 +43,18 @@ async function startSession(userId: string, request: Request, set: { headers: Re
 // Credential routes. IP-rate-limited to 10/min (§12m) — IP, not user, because the caller is not
 // yet authenticated and an attacker controls any submitted identifier.
 export const auth = new Elysia({ prefix: "/api/auth" })
-  .onBeforeHandle(({ request }) => enforceRateLimit(`rl:ip:${clientIp(request)}:auth`, 10, 60))
+  .onBeforeHandle(({ request }) => {
+    const path = new URL(request.url).pathname;
+    // The OIDC callback is an IdP-driven redirect, not an attacker-controlled credential submission
+    // (it needs a valid tx cookie + matching state + a real IdP code, and failures are logged) —
+    // exempt it so a normal login round trip doesn't burn the credential bucket.
+    if (path === "/api/auth/oidc/callback") return;
+    const ip = clientIp(request);
+    // Starting a login redirect is cheap and self-limited by the IdP; give it a looser, separate
+    // bucket so repeated sign-in attempts don't lock out password login (and vice versa).
+    if (path === "/api/auth/oidc/login") return enforceRateLimit(`rl:ip:${ip}:oidc`, 30, 60);
+    return enforceRateLimit(`rl:ip:${ip}:auth`, 10, 60);
+  })
   .post(
     "/signup",
     async ({ body, request, set }) => {
@@ -50,6 +62,12 @@ export const auth = new Elysia({ prefix: "/api/auth" })
       if (existing.length) {
         set.status = 409;
         return { error: "EMAIL_TAKEN" };
+      }
+      // Account-creation policy (invite-only / bootstrap) — same gate as the OIDC path.
+      if (!(await canCreateAccount(body.email))) {
+        securityEvent("auth.signup_blocked", { email: body.email, via: "password" });
+        set.status = 403;
+        return { error: "SIGNUP_CLOSED" };
       }
       const [u] = await db
         .insert(users)
@@ -108,13 +126,16 @@ export const auth = new Elysia({ prefix: "/api/auth" })
   // --- OIDC login via external IdP (Authentik). GET routes = browser navigations. ---
   // Step 1: stash a CSRF state + nonce + PKCE verifier in Redis, carry the tx id in a short-lived
   // Lax cookie (Lax so it survives the top-level redirect back from the IdP), 302 to the IdP.
-  .get("/oidc/login", async ({ set }) => {
+  .get("/oidc/login", async ({ query, set }) => {
     if (!oidcEnabled) return oidcDisabled(set);
     const tx = randomToken();
     const state = randomToken();
     const nonce = randomToken();
     const { verifier, challenge } = pkcePair();
-    await redis.set(txKey(tx), JSON.stringify({ state, nonce, verifier }), "EX", OIDC_TX_TTL);
+    // Where to land after login (e.g. /invite/<token>). Sanitised to a same-site relative path to
+    // prevent the callback being turned into an open redirect.
+    const ret = safeReturnPath(query.return);
+    await redis.set(txKey(tx), JSON.stringify({ state, nonce, verifier, ret }), "EX", OIDC_TX_TTL);
     set.headers["set-cookie"] = txCookie(tx);
     redirect(set, await buildAuthorizeUrl({ state, nonce, codeChallenge: challenge }));
   })
@@ -125,10 +146,14 @@ export const auth = new Elysia({ prefix: "/api/auth" })
     if (!oidcEnabled) return oidcDisabled(set);
     const tx = readCookie(request.headers.get("cookie"), "oidc_tx");
     const clearTx = "oidc_tx=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0";
+    // Return path is recovered from the tx (already sanitised at /login). Errors land back on it too,
+    // so e.g. an invite page shows the failure in context rather than bouncing to the root.
+    let ret = "/";
     const fail = (reason: string) => {
       securityEvent("auth.oidc_login_failed", { reason });
       set.headers["set-cookie"] = clearTx;
-      redirect(set, `${config.MEKO_WEB_URL}/?auth_error=${reason}`);
+      const sep = ret.includes("?") ? "&" : "?";
+      redirect(set, `${config.MEKO_WEB_URL}${ret}${sep}auth_error=${reason}`);
     };
 
     if (query.error) return fail(String(query.error));
@@ -136,7 +161,8 @@ export const auth = new Elysia({ prefix: "/api/auth" })
 
     const raw = await redis.getdel(txKey(tx));
     if (!raw) return fail("expired_tx");
-    const { state, nonce, verifier } = JSON.parse(raw) as { state: string; nonce: string; verifier: string };
+    const { state, nonce, verifier, ret: txRet } = JSON.parse(raw) as { state: string; nonce: string; verifier: string; ret?: string };
+    ret = safeReturnPath(txRet);
     if (state !== query.state) return fail("state_mismatch");
 
     try {
@@ -145,8 +171,10 @@ export const auth = new Elysia({ prefix: "/api/auth" })
       const refreshRaw = await issueRefreshFamily(userId, request.headers.get("user-agent") ?? undefined, clientIp(request));
       // Two Set-Cookie headers: clear the tx cookie + install the session refresh cookie.
       set.headers["set-cookie"] = [clearTx, refreshCookie(refreshRaw)];
-      redirect(set, config.MEKO_WEB_URL);
-    } catch {
+      redirect(set, `${config.MEKO_WEB_URL}${ret}`);
+    } catch (e) {
+      if (e instanceof OidcLinkError) return fail("email_unverified");
+      if (e instanceof SignupClosedError) return fail("signup_closed");
       return fail("verification_failed");
     }
   });
@@ -154,6 +182,13 @@ export const auth = new Elysia({ prefix: "/api/auth" })
 const OIDC_TX_TTL = 600; // 10 min to complete the round trip
 const txKey = (tx: string) => `oidc:tx:${tx}`;
 const txCookie = (tx: string) => `oidc_tx=${tx}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=${OIDC_TX_TTL}`;
+
+// Constrain a post-login redirect target to a same-site relative path. Rejects absolute URLs,
+// scheme-relative (`//host`), and backslash tricks so the callback can't be an open redirect.
+function safeReturnPath(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/";
+  return raw;
+}
 
 function redirect(set: { status?: number | string; headers: Record<string, string | number | string[]> }, url: string) {
   set.status = 302;
@@ -164,13 +199,33 @@ function oidcDisabled(set: { status?: number | string }) {
   return { error: "NOT_FOUND" };
 }
 
-// Authenticated, mints a single-use WS ticket (§5g). Separate group — not IP-rate-limited.
-export const wsTicket = new Elysia({ prefix: "/api" }).post("/ws-ticket", async ({ request, set }) => {
-  const userId = bearerUser(request.headers.get("authorization"));
-  if (!userId) {
-    securityEvent("auth.ws_ticket_denied", { reason: "no_access_token" });
-    set.status = 401;
-    return { error: "UNAUTHENTICATED" };
-  }
-  return await issueWsTicket(userId);
-});
+// Authenticated /api routes that should NOT sit under the IP rate-limiter (separate group): the
+// WS-ticket mint (§5g) and the current-user lookup.
+export const wsTicket = new Elysia({ prefix: "/api" })
+  .post("/ws-ticket", async ({ request, set }) => {
+    const userId = bearerUser(request.headers.get("authorization"));
+    if (!userId) {
+      securityEvent("auth.ws_ticket_denied", { reason: "no_access_token" });
+      set.status = 401;
+      return { error: "UNAUTHENTICATED" };
+    }
+    return await issueWsTicket(userId);
+  })
+  // Identity of the bearer — who am I logged in as. Used by the client to render the account chip.
+  .get("/auth/me", async ({ request, set }) => {
+    const userId = bearerUser(request.headers.get("authorization"));
+    if (!userId) {
+      set.status = 401;
+      return { error: "UNAUTHENTICATED" };
+    }
+    const [u] = await db
+      .select({ id: users.id, email: users.email, displayName: users.displayName })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!u) {
+      set.status = 401;
+      return { error: "UNAUTHENTICATED" };
+    }
+    return u;
+  });
