@@ -43,6 +43,7 @@ import { EmbedChoiceModal, UrlChoiceModal } from "./canvas/ChoiceModals.tsx";
 import { ElementCard } from "./canvas/ElementCard.tsx";
 import { useViewport } from "./canvas/useViewport.ts";
 import { useEdges } from "./canvas/useEdges.ts";
+import { useColumns } from "./canvas/useColumns.ts";
 import { TOOL_SPECS } from "./canvas/tools.ts";
 
 export interface BoardControls {
@@ -155,17 +156,6 @@ export function Canvas({
   const reportHeight = useCallback((id: string, h: number) => {
     setCardHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
   }, []);
-  // Live column drop target (highlight + insertion index) while dragging a card.
-  const [colDrop, setColDrop] = useState<{
-    colId: string;
-    index: number;
-  } | null>(null);
-  // Floating preview of a column child detached under the cursor while dragging it out.
-  const [childDragGhost, setChildDragGhost] = useState<{
-    id: string;
-    cx: number;
-    cy: number;
-  } | null>(null);
   // Right-click context menu: screen position + the element ids it acts on.
   const [menu, setMenu] = useState<{
     x: number;
@@ -238,6 +228,8 @@ export function Canvas({
   const lines: LineShape[] = connRef.current
     ? Array.from(connRef.current.lines.values())
     : [];
+  // Next stacking z (above everything). Defined early so the hooks below can place new elements.
+  const nextZ = () => Math.max(0, ...elements.map((e) => e.z ?? 0)) + 1;
   // Edges (arrows + standalone lines): all edge state, drags, and derived geometry live in useEdges.
   // Element selection still lives here, so the hook gets the element-selection setters.
   const edges = useEdges({
@@ -405,40 +397,27 @@ export function Canvas({
     const r = deleteRef.current?.getBoundingClientRect();
     return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   };
-  // Column under a screen point + the child index a drop there would land at (via the live DOM).
-  const columnDropAt = (
-    clientX: number,
-    clientY: number,
-    excludeId?: string,
-  ): { colId: string; index: number } | null => {
-    for (const node of Array.from(
-      document.querySelectorAll<HTMLElement>("[data-column-id]"),
-    )) {
-      const colId = node.getAttribute("data-column-id")!;
-      if (colId === excludeId) continue;
-      const r = node.getBoundingClientRect();
-      if (
-        clientX < r.left ||
-        clientX > r.right ||
-        clientY < r.top ||
-        clientY > r.bottom
-      )
-        continue;
-      const kids = Array.from(
-        node.querySelectorAll<HTMLElement>("[data-col-child]"),
-      );
-      let index = kids.length;
-      for (let i = 0; i < kids.length; i++) {
-        const kr = kids[i]!.getBoundingClientRect();
-        if (clientY < kr.top + kr.height / 2) {
-          index = i;
-          break;
-        }
-      }
-      return { colId, index };
-    }
-    return null;
-  };
+  // Columns (nesting): drop-target highlight, drag ghost, and reparent/extract/drag/group ops.
+  const {
+    colDrop,
+    setColDrop,
+    childDragGhost,
+    columnDropAt,
+    moveChildToColumn,
+    startColumnChildDrag,
+    groupIntoColumn,
+  } = useColumns({
+    connRef,
+    toWorld,
+    selectedIds,
+    childToCol,
+    readOnly,
+    nextZ,
+    pruneConnections,
+    selectId,
+    selectNew,
+    setDraggingId,
+  });
   const handleDragMove = (id: string, x: number, y: number) => {
     setDraggingId(id);
     setOverDelete(overDeleteZone(x, y));
@@ -557,51 +536,6 @@ export function Canvas({
     document.addEventListener("selectionchange", onSel);
     return () => document.removeEventListener("selectionchange", onSel);
   }, []);
-
-  // Drag a card that lives inside a column: reorder within, move to another column, or pop it out
-  // onto the canvas. A press without movement just selects it.
-  const startColumnChildDrag = (childId: string, e: React.PointerEvent) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    let moved = false;
-    const move = (ev: PointerEvent) => {
-      if (
-        !moved &&
-        Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) < 4
-      )
-        return;
-      moved = true;
-      setDraggingId(childId);
-      setColDrop(columnDropAt(ev.clientX, ev.clientY));
-      setChildDragGhost({ id: childId, cx: ev.clientX, cy: ev.clientY });
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setDraggingId(null);
-      setColDrop(null);
-      setChildDragGhost(null);
-      if (!moved) {
-        selectId(childId);
-        return;
-      }
-      const targets =
-        selectedIds.includes(childId) && selectedIds.length > 1
-          ? selectedIds.filter((tid) => childToCol.has(tid))
-          : [childId];
-      const drop = columnDropAt(ev.clientX, ev.clientY);
-      if (drop)
-        targets.forEach((t, i) =>
-          moveChildToColumn(t, drop.colId, drop.index + i),
-        );
-      else {
-        const w = toWorld(ev.clientX, ev.clientY);
-        targets.forEach((t, i) => extractChild(t, w.x, w.y + i * 24));
-      }
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
 
   // Publish the full control set whenever undo state or the view changes (the undo events feed
   // canUndo/canRedo above; zoom/grid come from local state).
@@ -767,57 +701,8 @@ export function Canvas({
     selectNew(id);
   };
 
-  // --- Column reparenting (one transaction so it's a single undo step) ---
-  const moveChildToColumn = (childId: string, colId: string, index: number) => {
-    const c = connRef.current;
-    if (!c) return;
-    c.doc.transact(() => {
-      for (const e of c.elements.values()) {
-        if (
-          e.type === "column" &&
-          e.children.includes(childId) &&
-          e.id !== colId
-        ) {
-          c.elements.set(e.id, {
-            ...e,
-            children: e.children.filter((id) => id !== childId),
-          });
-        }
-      }
-      const col = c.elements.get(colId);
-      if (col?.type !== "column") return;
-      const next = col.children.filter((id) => id !== childId);
-      next.splice(Math.max(0, Math.min(index, next.length)), 0, childId);
-      c.elements.set(colId, { ...col, children: next });
-      // A child lives inside the column now (its x/y is stale), so drop any arrows/lines that
-      // pointed at it — otherwise they'd dangle to its old position.
-      pruneConnections(new Set([childId]));
-      for (const ln of Array.from(c.lines.values())) {
-        if (ln.a.elementId === childId || ln.b.elementId === childId)
-          c.lines.delete(ln.id);
-      }
-    });
-  };
-  // Pop a child out of its column to a free position on the canvas.
-  const extractChild = (childId: string, x: number, y: number) => {
-    const c = connRef.current;
-    if (!c) return;
-    c.doc.transact(() => {
-      for (const e of c.elements.values()) {
-        if (e.type === "column" && e.children.includes(childId)) {
-          c.elements.set(e.id, {
-            ...e,
-            children: e.children.filter((id) => id !== childId),
-          });
-        }
-      }
-      const child = c.elements.get(childId);
-      if (child) c.elements.set(childId, { ...child, x, y });
-    });
-  };
 
   // --- Context-menu actions ---
-  const nextZ = () => Math.max(0, ...elements.map((e) => e.z ?? 0)) + 1;
   const bringToFront = (ids: string[]) => {
     const c = connRef.current;
     if (!c) return;
@@ -897,32 +782,6 @@ export function Canvas({
     setSelectedConn(null);
     setSelectedLine(null);
   };
-  // Wrap the selected (non-column) elements into a new column at their top-left.
-  const groupIntoColumn = (ids: string[]) => {
-    const c = connRef.current;
-    if (!c) return;
-    const els = ids
-      .map((id) => c.elements.get(id))
-      .filter((e): e is Element => !!e && e.type !== "column");
-    if (!els.length) return;
-    const minX = Math.min(...els.map((e) => e.x));
-    const minY = Math.min(...els.map((e) => e.y));
-    const id = crypto.randomUUID();
-    c.elements.set(id, {
-      id,
-      type: "column",
-      x: minX,
-      y: minY,
-      w: 280,
-      h: 120,
-      title: "",
-      children: els.map((e) => e.id),
-      z: nextZ(),
-      style: { fill: "#ffffff" },
-    });
-    selectNew(id);
-  };
-
   // Copy elements (deep, with column children) into the internal clipboard.
   const copyEls = (ids: string[]) => {
     const c = connRef.current;
