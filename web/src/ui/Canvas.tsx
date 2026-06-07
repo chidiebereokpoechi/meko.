@@ -10,13 +10,7 @@ import {
   embeddableUrl,
   extractIframeSrc,
 } from "../lib/embed.ts";
-import type {
-  Board,
-  Connection,
-  Element,
-  LineEndpoint,
-  LineShape,
-} from "../types.ts";
+import type { Board, Connection, Element, LineShape } from "../types.ts";
 import { Badge, ContextMenu, Icon, type MenuItem, toast } from "./kit/index.ts";
 import { type Tool } from "./layout/ToolRail.tsx";
 import { SelectionRail } from "./canvas/SelectionRail.tsx";
@@ -30,12 +24,6 @@ import {
   WORLD_H,
   WORLD_W,
 } from "./canvas/constants.ts";
-import {
-  computeLineGeo,
-  computeLines,
-  nearestAnchor,
-  resolveEnd,
-} from "./canvas/geometry.ts";
 import {
   escapeText,
   htmlVisibleText,
@@ -54,6 +42,7 @@ import {
 import { EmbedChoiceModal, UrlChoiceModal } from "./canvas/ChoiceModals.tsx";
 import { ElementCard } from "./canvas/ElementCard.tsx";
 import { useViewport } from "./canvas/useViewport.ts";
+import { useEdges } from "./canvas/useEdges.ts";
 import { TOOL_SPECS } from "./canvas/tools.ts";
 
 export interface BoardControls {
@@ -166,31 +155,6 @@ export function Canvas({
   const reportHeight = useCallback((id: string, h: number) => {
     setCardHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
   }, []);
-  // In-progress arrow drag from an element's connect ball; linkEnd is the live pointer (world).
-  const [linking, setLinking] = useState<{ from: string } | null>(null);
-  const [linkEnd, setLinkEnd] = useState<{ x: number; y: number } | null>(null);
-  const [linkTarget, setLinkTarget] = useState<string | null>(null); // hovered valid drop element
-  const [selectedConn, setSelectedConn] = useState<string | null>(null);
-  // Inline label editing + live endpoint reassignment for the selected connection.
-  const [editingConnLabel, setEditingConnLabel] = useState<string | null>(null);
-  const [connDrag, setConnDrag] = useState<{
-    id: string;
-    which: "from" | "to";
-    pos: { x: number; y: number };
-  } | null>(null);
-  // Standalone line tool: arm (tool clicked), in-progress draw, selection, endpoint drag, label.
-  const [armLine, setArmLine] = useState(false);
-  const [lineDraw, setLineDraw] = useState<{
-    a: LineEndpoint;
-    b: LineEndpoint;
-  } | null>(null);
-  const [selectedLine, setSelectedLine] = useState<string | null>(null);
-  const [lineDrag, setLineDrag] = useState<{
-    id: string;
-    which: "a" | "b";
-    ep: LineEndpoint;
-  } | null>(null);
-  const [editingLineLabel, setEditingLineLabel] = useState<string | null>(null);
   // Live column drop target (highlight + insertion index) while dragging a card.
   const [colDrop, setColDrop] = useState<{
     colId: string;
@@ -271,17 +235,56 @@ export function Canvas({
     ...e,
     h: cardHeights[e.id] ?? e.h,
   }));
-  const connLines = computeLines(sizedElements, connections, connDrag);
   const lines: LineShape[] = connRef.current
     ? Array.from(connRef.current.lines.values())
     : [];
-  const lineGeo = computeLineGeo(lines, sizedElements, lineDrag);
-  // Snap indicator ring while drawing or dragging an endpoint onto an element anchor.
-  const snapPt = lineDraw?.b.elementId
-    ? { x: lineDraw.b.x, y: lineDraw.b.y }
-    : lineDrag?.ep.elementId
-      ? { x: lineDrag.ep.x, y: lineDrag.ep.y }
-      : null;
+  // Edges (arrows + standalone lines): all edge state, drags, and derived geometry live in useEdges.
+  // Element selection still lives here, so the hook gets the element-selection setters.
+  const edges = useEdges({
+    connRef,
+    toWorld,
+    zoom: view.zoom,
+    elements,
+    sizedElements,
+    childToCol,
+    connections,
+    lines,
+    readOnly,
+    setSelectedIds,
+  });
+  const {
+    selectedConn,
+    setSelectedConn,
+    selectedLine,
+    setSelectedLine,
+    editingConnLabel,
+    setEditingConnLabel,
+    editingLineLabel,
+    setEditingLineLabel,
+    armLine,
+    setArmLine,
+    lineDraw,
+    linking,
+    linkEnd,
+    linkTarget,
+    connLines,
+    lineGeo,
+    snapPt,
+    removeConnection,
+    setConnectionLabel,
+    patchConnection,
+    patchLine,
+    removeLine,
+    setLineLabel,
+    startLink,
+    startEndpointDrag,
+    startBendDrag,
+    startLineEndpointDrag,
+    startLineBendDrag,
+    beginLineDraw,
+    updateLineDraw,
+    commitLineDraw,
+  } = edges;
   // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
   // select many.
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
@@ -305,48 +308,6 @@ export function Canvas({
     setSelectedConn(null);
     setJustCreated(id);
   };
-
-  // --- Connections (arrows between elements) ---
-  const addConnection = (from: string, to: string) => {
-    const c = connRef.current;
-    if (!c || from === to) return;
-    // Avoid duplicate arrows in the same direction.
-    if (
-      Array.from(c.connections.values()).some(
-        (cn) => cn.from === from && cn.to === to,
-      )
-    )
-      return;
-    const id = crypto.randomUUID();
-    c.connections.set(id, { id, from, to, arrowEnd: true });
-  };
-  const removeConnection = (id: string) => {
-    connRef.current?.connections.delete(id);
-    setSelectedConn((s) => (s === id ? null : s));
-  };
-  const setConnectionLabel = (id: string, label: string) => {
-    const c = connRef.current;
-    const cur = c?.connections.get(id);
-    if (c && cur) c.connections.set(id, { ...cur, label: label || undefined });
-  };
-  const patchConnection = (id: string, p: Partial<Connection>) => {
-    const c = connRef.current;
-    const cur = c?.connections.get(id);
-    if (c && cur) c.connections.set(id, { ...cur, ...p });
-  };
-
-  // --- Standalone lines ---
-  const patchLine = (id: string, p: Partial<LineShape>) => {
-    const c = connRef.current;
-    const cur = c?.lines.get(id);
-    if (c && cur) c.lines.set(id, { ...cur, ...p });
-  };
-  const removeLine = (id: string) => {
-    connRef.current?.lines.delete(id);
-    setSelectedLine((s) => (s === id ? null : s));
-  };
-  const setLineLabel = (id: string, label: string) =>
-    patchLine(id, { label: label || undefined });
 
   useEffect(() => {
     for (const el of elements) {
@@ -597,54 +558,6 @@ export function Canvas({
     return () => document.removeEventListener("selectionchange", onSel);
   }, []);
 
-  // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
-  // to whatever element sits under the cursor.
-  // A valid drop target: topmost element under the point that isn't the source and isn't already
-  // connected from the source in that direction.
-  const linkTargetAt = (
-    w: { x: number; y: number },
-    from: string,
-  ): string | null => {
-    const el = [...sizedElements]
-      .reverse()
-      .find(
-        (e) =>
-          e.id !== from &&
-          !childToCol.has(e.id) &&
-          w.x >= e.x &&
-          w.x <= e.x + e.w &&
-          w.y >= e.y &&
-          w.y <= e.y + e.h,
-      );
-    if (!el) return null;
-    const dup = Array.from(connRef.current?.connections.values() ?? []).some(
-      (cn) => cn.from === from && cn.to === el.id,
-    );
-    return dup ? null : el.id;
-  };
-  const startLink = (from: string, e: React.PointerEvent) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    setLinking({ from });
-    setLinkEnd(toWorld(e.clientX, e.clientY));
-    const move = (ev: PointerEvent) => {
-      const w = toWorld(ev.clientX, ev.clientY);
-      setLinkEnd(w);
-      setLinkTarget(linkTargetAt(w, from));
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      const target = linkTargetAt(toWorld(ev.clientX, ev.clientY), from);
-      if (target) addConnection(from, target);
-      setLinking(null);
-      setLinkEnd(null);
-      setLinkTarget(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
   // Drag a card that lives inside a column: reorder within, move to another column, or pop it out
   // onto the canvas. A press without movement just selects it.
   const startColumnChildDrag = (childId: string, e: React.PointerEvent) => {
@@ -690,136 +603,6 @@ export function Canvas({
     window.addEventListener("pointerup", up);
   };
 
-  // Drag a selected connection's endpoint to re-anchor it: the endpoint follows the cursor, and on
-  // release it reassigns to whatever element is under the pointer (must differ from the other end).
-  const startEndpointDrag = (
-    id: string,
-    which: "from" | "to",
-    e: React.PointerEvent,
-  ) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    setConnDrag({ id, which, pos: toWorld(e.clientX, e.clientY) });
-    const move = (ev: PointerEvent) =>
-      setConnDrag({ id, which, pos: toWorld(ev.clientX, ev.clientY) });
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      const w = toWorld(ev.clientX, ev.clientY);
-      const cn = connRef.current?.connections.get(id);
-      const target = [...sizedElements]
-        .reverse()
-        .find(
-          (el) =>
-            !childToCol.has(el.id) &&
-            w.x >= el.x &&
-            w.x <= el.x + el.w &&
-            w.y >= el.y &&
-            w.y <= el.y + el.h,
-        );
-      if (cn && target) {
-        const other = which === "from" ? cn.to : cn.from;
-        if (target.id !== other) patchConnection(id, { [which]: target.id });
-      }
-      setConnDrag(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
-  // Drag the midpoint handle to curve the line; releasing near the straight midpoint snaps it back.
-  const startBendDrag = (id: string, e: React.PointerEvent) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    const apply = (clientX: number, clientY: number) => {
-      const c = connRef.current;
-      const cn = c?.connections.get(id);
-      const from = elements.find((el) => el.id === cn?.from);
-      const to = elements.find((el) => el.id === cn?.to);
-      if (!cn || !from || !to) return;
-      const mid = {
-        x: (from.x + from.w / 2 + to.x + to.w / 2) / 2,
-        y: (from.y + from.h / 2 + to.y + to.h / 2) / 2,
-      };
-      const w = toWorld(clientX, clientY);
-      // ctrl ≈ 2*(handle - mid) so the curve's midpoint tracks the cursor.
-      const bend = { x: 2 * (w.x - mid.x), y: 2 * (w.y - mid.y) };
-      patchConnection(id, {
-        bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend,
-      });
-    };
-    const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
-  // Snap a pointer position to the nearest element anchor (corner / edge-mid / centre), else free.
-  const snapEndpoint = (clientX: number, clientY: number): LineEndpoint => {
-    const w = toWorld(clientX, clientY);
-    const hit = nearestAnchor(
-      w,
-      sizedElements.filter((e) => !childToCol.has(e.id)),
-      12 / view.zoom,
-    );
-    return hit
-      ? {
-          x: hit.pt.x,
-          y: hit.pt.y,
-          elementId: hit.elementId,
-          anchor: hit.anchor,
-        }
-      : { x: w.x, y: w.y };
-  };
-  // Drag a line endpoint: it follows the cursor and snaps/pins to an element anchor on release.
-  const startLineEndpointDrag = (
-    id: string,
-    which: "a" | "b",
-    e: React.PointerEvent,
-  ) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    setLineDrag({ id, which, ep: snapEndpoint(e.clientX, e.clientY) });
-    const move = (ev: PointerEvent) =>
-      setLineDrag({ id, which, ep: snapEndpoint(ev.clientX, ev.clientY) });
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      patchLine(id, { [which]: snapEndpoint(ev.clientX, ev.clientY) });
-      setLineDrag(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-  // Bend a line by dragging its midpoint handle (quadratic control); snaps back near straight.
-  const startLineBendDrag = (id: string, e: React.PointerEvent) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    const byId = new Map(sizedElements.map((el) => [el.id, el]));
-    const apply = (clientX: number, clientY: number) => {
-      const ln = connRef.current?.lines.get(id);
-      if (!ln) return;
-      const a = resolveEnd(ln.a, byId);
-      const b = resolveEnd(ln.b, byId);
-      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const w = toWorld(clientX, clientY);
-      const bend = { x: 2 * (w.x - mid.x), y: 2 * (w.y - mid.y) };
-      patchLine(id, {
-        bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend,
-      });
-    };
-    const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
   // Publish the full control set whenever undo state or the view changes (the undo events feed
   // canUndo/canRedo above; zoom/grid come from local state).
   useEffect(() => {
@@ -844,8 +627,7 @@ export function Canvas({
   const onViewportPointerDown = (e: React.PointerEvent) => {
     if (armLine) {
       // Line tool armed: press = start point (snapped), drag to end.
-      const a = snapEndpoint(e.clientX, e.clientY);
-      setLineDraw({ a, b: a });
+      beginLineDraw(e.clientX, e.clientY);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
@@ -870,9 +652,7 @@ export function Canvas({
     const w = toWorld(e.clientX, e.clientY);
     connRef.current?.sendCursor(w.x, w.y);
     if (lineDraw) {
-      setLineDraw((d) =>
-        d ? { a: d.a, b: snapEndpoint(e.clientX, e.clientY) } : d,
-      );
+      updateLineDraw(e.clientX, e.clientY);
       return;
     }
     const p = panRef.current;
@@ -889,29 +669,7 @@ export function Canvas({
   };
   const onViewportPointerUp = () => {
     if (lineDraw) {
-      // Commit the drawn line if it has length; otherwise discard a stray click.
-      const len = Math.hypot(
-        lineDraw.b.x - lineDraw.a.x,
-        lineDraw.b.y - lineDraw.a.y,
-      );
-      if (len > 8) {
-        const c = connRef.current;
-        if (c) {
-          const id = crypto.randomUUID();
-          c.lines.set(id, {
-            id,
-            a: lineDraw.a,
-            b: lineDraw.b,
-            arrowStart: false,
-            arrowEnd: false,
-          });
-          setSelectedLine(id);
-          setSelectedIds([]);
-          setSelectedConn(null);
-        }
-      }
-      setLineDraw(null);
-      setArmLine(false);
+      commitLineDraw();
       return;
     }
     panRef.current = null;
