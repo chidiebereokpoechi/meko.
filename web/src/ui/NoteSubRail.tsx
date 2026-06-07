@@ -76,7 +76,12 @@ export function NoteSubRail({
     if (!colorOpen && !styleOpen) return;
     const onDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement;
-      if (t.closest("[data-note-pane]") || t.closest("[data-note-rail]") || t.closest("[data-selected-element]")) return;
+      if (
+        t.closest("[data-note-pane]") ||
+        t.closest("[data-note-rail]") ||
+        t.closest("[data-selected-element]")
+      )
+        return;
       setColorOpen(false);
       setStyleOpen(false);
     };
@@ -98,8 +103,49 @@ export function NoteSubRail({
   };
 
   return (
-    <nav data-note-rail className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
-      <RailBtn label={editing ? "Back" : "Done"} icon={<Icon.ArrowLeftIcon />} onClick={editing ? onBack : onDone} />
+    <RailShell
+      deleteRef={deleteRef}
+      deleteActive={deleteActive}
+      onDelete={onDelete}
+      panels={
+        <>
+          {colorOpen && !editing && (
+            <Popover top={colorRef.current?.offsetTop ?? 0}>
+              <ColorTabs
+                fill={el.style?.fill}
+                strip={el.style?.strip}
+                onFill={onFill}
+                onStrip={onStrip}
+              />
+            </Popover>
+          )}
+          {styleOpen && editing && (
+            <Popover top={styleRef.current?.offsetTop ?? 0}>
+              <StyleBlocks onExec={onExec} />
+              <div className="my-4 border-t-2 border-line-subtle" />
+              <Section label="Color">
+                <ATextColors
+                  current={cmdColor("foreColor")}
+                  onPick={(c) => onExec("foreColor", c)}
+                />
+              </Section>
+              <div className="my-4 border-t-2 border-line-subtle" />
+              <Section label="Highlight">
+                <ColorPicker
+                  value={cmdColor("backColor") ?? cmdColor("hiliteColor")}
+                  onChange={(c) => onExec("backColor", c)}
+                />
+              </Section>
+            </Popover>
+          )}
+        </>
+      }
+    >
+      <RailBtn
+        label={editing ? "Back" : "Done"}
+        icon={<Icon.ArrowLeftIcon />}
+        onClick={editing ? onBack : onDone}
+      />
 
       {editing ? (
         <>
@@ -182,45 +228,34 @@ export function NoteSubRail({
             active={colorOpen}
             icon={
               <span className="flex h-5 w-5 flex-col overflow-hidden rounded-md ring-2 ring-inset ring-slate-300">
-                {el.style?.strip && <span className="h-1.5 shrink-0" style={{ background: el.style.strip }} />}
-                <span className="flex-1" style={{ background: el.style?.fill ?? "#ffffff" }} />
+                {el.style?.strip && (
+                  <span
+                    className="h-1.5 shrink-0"
+                    style={{ background: el.style.strip }}
+                  />
+                )}
+                <span
+                  className="flex-1"
+                  style={{ background: el.style?.fill ?? "#ffffff" }}
+                />
               </span>
             }
             onClick={() => setColorOpen((o) => !o)}
           />
         </div>
       )}
-
-      <span className="flex-1" />
-      <div ref={deleteRef} className="flex w-full justify-center">
-        <RailBtn label="Delete" icon={<Icon.TrashIcon />} dangerActive={deleteActive} onClick={onDelete} />
-      </div>
-
-      {colorOpen && !editing && (
-        <Popover top={colorRef.current?.offsetTop ?? 0}>
-          <ColorTabs fill={el.style?.fill} strip={el.style?.strip} onFill={onFill} onStrip={onStrip} />
-        </Popover>
-      )}
-
-      {styleOpen && editing && (
-        <Popover top={styleRef.current?.offsetTop ?? 0}>
-          <StyleBlocks onExec={onExec} />
-          <div className="my-4 border-t-2 border-slate-100" />
-          <Section label="Color">
-            <ATextColors current={cmdColor("foreColor")} onPick={(c) => onExec("foreColor", c)} />
-          </Section>
-          <div className="my-4 border-t-2 border-slate-100" />
-          <Section label="Highlight">
-            <ColorPicker value={cmdColor("backColor") ?? cmdColor("hiliteColor")} onChange={(c) => onExec("backColor", c)} />
-          </Section>
-        </Popover>
-      )}
-    </nav>
+    </RailShell>
   );
 }
 
-// `label` is always used for the hover tooltip; the visible caption under the icon is optional
-// (omitted for standard inline text tools like Bold/Italic, shown for Done/Text style/Color/Delete).
+// The single rail-button primitive shared by EVERY rail (create tool rail + element sub-rails), so
+// they all inherit the same look and behaviour. Two modes, picked by the props given:
+//   • Placeable (onPlace/onStartPlace) — the create tools: double-click or press-and-drag to spawn
+//     an element. Gets the grab cursor and keeps the native pointerdown (needed for the drag).
+//   • Action (onClick only) — Done/Color/Delete/Bold/etc.: calls preventDefault on mousedown so it
+//     doesn't steal the caret/selection (formatting must apply to the selected note text).
+// `label` is always the hover tooltip; the visible caption under the icon is optional (hidden for
+// inline text tools like Bold/Italic, shown for Done/Text style/Color/Delete).
 export const RailBtn = ({
   label,
   shortcut,
@@ -228,7 +263,10 @@ export const RailBtn = ({
   active,
   dangerActive,
   hideCaption,
+  disabled,
   onClick,
+  onPlace,
+  onStartPlace,
 }: {
   label: string;
   shortcut?: string;
@@ -236,33 +274,102 @@ export const RailBtn = ({
   active?: boolean;
   dangerActive?: boolean;
   hideCaption?: boolean;
-  onClick: () => void;
-}) => (
-  <Tooltip label={label} shortcut={shortcut}>
-    <button
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      className="group flex w-full flex-col items-center gap-1 py-1.5"
-    >
-      <span
-        className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg transition-all ${dangerActive ? "scale-110 bg-red-500 text-white" : active ? "bg-primary text-white" : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-700"}`}
+  disabled?: boolean;
+  onClick?: () => void;
+  // Double-click to drop the element at the canvas centre.
+  onPlace?: () => void;
+  // Press-and-drag to spawn the element under the cursor and place it on release.
+  onStartPlace?: (e: React.PointerEvent) => void;
+}) => {
+  const placeable = !!onStartPlace || !!onPlace;
+  return (
+    <Tooltip label={label} shortcut={shortcut}>
+      <button
+        onClick={onClick}
+        onDoubleClick={onPlace}
+        disabled={disabled}
+        title=""
+        // Action buttons keep the selection (preventDefault); placeable buttons need the native
+        // pointerdown to start the drag.
+        onMouseDown={placeable ? undefined : (e) => e.preventDefault()}
+        onPointerDown={
+          onStartPlace && !disabled
+            ? (e) => {
+                e.preventDefault();
+                onStartPlace(e);
+              }
+            : undefined
+        }
+        className="group flex w-full flex-col items-center gap-1 py-1.5 disabled:opacity-40"
       >
-        {icon}
-      </span>
-      {!hideCaption && (
-        <span className="text-[10px] font-bold text-slate-400">{label}</span>
+        <span
+          className={`grid h-9 w-9 place-items-center rounded-xl text-lg transition-all ${placeable ? "cursor-grab active:cursor-grabbing" : ""} ${dangerActive ? "scale-110 bg-red-500 text-white" : active ? "bg-primary text-white" : "bg-slate-100 text-slate-700 group-hover:bg-slate-200 group-hover:text-slate-900"}`}
+        >
+          {icon}
+        </span>
+        {!hideCaption && (
+          <span className="text-[10px] font-bold text-ink-muted">{label}</span>
+        )}
+      </button>
+    </Tooltip>
+  );
+};
+
+// Shared rail frame: fixed width, right border, white bg, the vertical button column, and the
+// pinned Delete tool at the bottom (the drop target for drag-to-delete). ToolRail and every element
+// sub-rail render ONLY their buttons as children — the chrome (width/border/bg) lives here alone,
+// so there is one border to control. `panels` holds the absolutely-positioned popovers.
+export function RailShell({
+  children,
+  deleteRef,
+  deleteActive,
+  onDelete,
+  deleteDisabled,
+  panels,
+}: {
+  children: ReactNode;
+  deleteRef?: React.Ref<HTMLDivElement>;
+  deleteActive?: boolean;
+  onDelete?: () => void;
+  deleteDisabled?: boolean;
+  panels?: ReactNode;
+}) {
+  return (
+    <nav
+      data-note-rail
+      className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-line bg-white py-3"
+    >
+      {children}
+      <span className="flex-1" />
+      {(onDelete || deleteDisabled) && (
+        <div ref={deleteRef} className="flex w-full justify-center">
+          <RailBtn
+            label="Delete"
+            icon={<Icon.TrashIcon />}
+            dangerActive={deleteActive}
+            disabled={deleteDisabled}
+            onClick={onDelete ?? (() => {})}
+          />
+        </div>
       )}
-    </button>
-  </Tooltip>
-);
+      {panels}
+    </nav>
+  );
+}
 
 // Popover panel anchored beside the rail (slate-50, 2px border). Closes via the tool toggle or
 // deselecting the note — no explicit close button.
-export function Popover({ top, children }: { top: number; children: ReactNode }) {
+export function Popover({
+  top,
+  children,
+}: {
+  top: number;
+  children: ReactNode;
+}) {
   return (
     <div
       data-note-pane
-      className="absolute left-full z-50 ml-2 max-h-[80vh] w-72 overflow-auto rounded-lg border-2 border-slate-200 bg-slate-50 p-5 shadow-lg"
+      className="absolute left-full z-50 ml-2 max-h-[80vh] w-72 overflow-auto rounded-lg border-2 border-line bg-slate-50 p-5 shadow-lg"
       style={{ top }}
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -283,7 +390,13 @@ const TEXT_COLORS = [
   "#6e24ff",
   "#d7658b",
 ];
-function ATextColors({ current, onPick }: { current?: string; onPick: (c: string) => void }) {
+function ATextColors({
+  current,
+  onPick,
+}: {
+  current?: string;
+  onPick: (c: string) => void;
+}) {
   return (
     <div className="grid grid-cols-6 gap-2">
       {TEXT_COLORS.map((c) => {
@@ -292,7 +405,7 @@ function ATextColors({ current, onPick }: { current?: string; onPick: (c: string
           <button
             key={c}
             onClick={() => onPick(c)}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg border-2 bg-white ${active ? "border-primary ring-2 ring-primary/30" : "border-slate-200 hover:border-primary/40"}`}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg border-2 bg-white ${active ? "border-primary ring-2 ring-primary/30" : "border-line hover:border-primary/40"}`}
           >
             <span className="font-black" style={{ color: c }}>
               A
@@ -378,35 +491,77 @@ function StyleBlocks({
   );
 }
 
-const TabBtn = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) => (
-  <button onClick={onClick} className={`flex flex-1 items-center justify-center rounded-lg px-3 py-2 text-xs font-bold ${active ? "bg-slate-100 text-slate-700" : "text-slate-400 hover:text-slate-600"}`}>
+const TabBtn = ({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) => (
+  <button
+    onClick={onClick}
+    className={`flex flex-1 items-center justify-center rounded-lg px-3 py-2 text-xs font-bold ${active ? "bg-slate-100 text-slate-700" : "text-slate-400 hover:text-slate-600"}`}
+  >
     {children}
   </button>
 );
 
 // Background / Top-strip tabbed picker (note selected, not editing).
-export function ColorTabs({ fill, strip, onFill, onStrip }: { fill?: string; strip?: string; onFill: (c: string) => void; onStrip: (c: string | null) => void }) {
+export function ColorTabs({
+  fill,
+  strip,
+  onFill,
+  onStrip,
+}: {
+  fill?: string;
+  strip?: string;
+  onFill: (c: string) => void;
+  onStrip: (c: string | null) => void;
+}) {
   const [tab, setTab] = useState<"bg" | "strip">("bg");
   return (
     <>
       <div className="mb-3 flex gap-2">
-        <TabBtn active={tab === "bg"} onClick={() => setTab("bg")}>Background</TabBtn>
-        <TabBtn active={tab === "strip"} onClick={() => setTab("strip")}>Top strip</TabBtn>
+        <TabBtn active={tab === "bg"} onClick={() => setTab("bg")}>
+          Background
+        </TabBtn>
+        <TabBtn active={tab === "strip"} onClick={() => setTab("strip")}>
+          Top strip
+        </TabBtn>
       </div>
-      {tab === "bg" ? <ColorPicker value={fill} onChange={onFill} /> : <StripPicker value={strip} onChange={onStrip} />}
+      {tab === "bg" ? (
+        <ColorPicker value={fill} onChange={onFill} />
+      ) : (
+        <StripPicker value={strip} onChange={onStrip} />
+      )}
     </>
   );
 }
 
 // Top-strip swatches: a "none" card (diagonal slash) + the note palette as little cards with a
 // coloured strip, plus a custom-colour toggle. Mirrors the Milanote top-strip picker.
-export function StripPicker({ value, onChange }: { value?: string; onChange: (c: string | null) => void }) {
+export function StripPicker({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange: (c: string | null) => void;
+}) {
   const [custom, setCustom] = useState(false);
   if (custom) {
     return (
       <div className="flex w-full flex-col items-center gap-4">
-        <HexColorPicker color={value ?? "#6E24FF"} onChange={(v) => onChange(v.toUpperCase())} style={{ width: "100%" }} />
-        <button onClick={() => setCustom(false)} className="w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-white hover:bg-primary-dark">
+        <HexColorPicker
+          color={value ?? "#6E24FF"}
+          onChange={(v) => onChange(v.toUpperCase())}
+          style={{ width: "100%" }}
+        />
+        <button
+          onClick={() => setCustom(false)}
+          className="w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-white hover:bg-primary-dark"
+        >
           Choose from presets
         </button>
       </div>
@@ -415,23 +570,59 @@ export function StripPicker({ value, onChange }: { value?: string; onChange: (c:
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-5 gap-2">
-        <StripCard color={null} selected={!value} onClick={() => onChange(null)} />
+        <StripCard
+          color={null}
+          selected={!value}
+          onClick={() => onChange(null)}
+        />
         {PALETTE.map((c) => (
-          <StripCard key={c} color={c} selected={value?.toLowerCase() === c.toLowerCase()} onClick={() => onChange(c)} />
+          <StripCard
+            key={c}
+            color={c}
+            selected={value?.toLowerCase() === c.toLowerCase()}
+            onClick={() => onChange(c)}
+          />
         ))}
       </div>
-      <button onClick={() => setCustom(true)} className="flex w-full items-center gap-2 rounded-lg border-2 border-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
-        <span className="h-5 w-5 rounded-full" style={{ background: "conic-gradient(red,orange,yellow,green,cyan,blue,violet,red)" }} />
+      <button
+        onClick={() => setCustom(true)}
+        className="flex w-full items-center gap-2 rounded-lg border-2 border-line-subtle px-3 py-2 text-xs font-bold text-slate-500"
+      >
+        <span
+          className="h-5 w-5 rounded-full"
+          style={{
+            background:
+              "conic-gradient(red,orange,yellow,green,cyan,blue,violet,red)",
+          }}
+        />
         Use custom color
       </button>
     </div>
   );
 }
 
-function StripCard({ color, selected, onClick }: { color: string | null; selected: boolean; onClick: () => void }) {
+function StripCard({
+  color,
+  selected,
+  onClick,
+}: {
+  color: string | null;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
-    <button onClick={onClick} className={`overflow-hidden rounded-md border-2 bg-white ${selected ? "border-primary ring-2 ring-primary/30" : "border-slate-200"}`}>
-      <div className="h-2.5" style={{ background: color ?? "linear-gradient(to top right, transparent 46%, #ef4444 46%, #ef4444 54%, transparent 54%)" }} />
+    <button
+      onClick={onClick}
+      className={`overflow-hidden rounded-md border-2 bg-white ${selected ? "border-primary ring-2 ring-primary/30" : "border-line"}`}
+    >
+      <div
+        className="h-2.5"
+        style={{
+          background:
+            color ??
+            "linear-gradient(to top right, transparent 46%, #ef4444 46%, #ef4444 54%, transparent 54%)",
+        }}
+      />
       <div className="h-5" />
     </button>
   );

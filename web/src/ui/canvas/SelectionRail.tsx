@@ -3,7 +3,7 @@ import type { Connection, Element, LineShape } from "../../types.ts";
 import { Icon } from "../kit/index.ts";
 import { ToolRail, type Tool } from "../layout/ToolRail.tsx";
 import { type ActiveEditor } from "../EditableNote.tsx";
-import { NoteSubRail } from "../NoteSubRail.tsx";
+import { NoteSubRail, RailShell } from "../NoteSubRail.tsx";
 import { LinkSubRail } from "../LinkSubRail.tsx";
 import { ImageSubRail } from "../ImageSubRail.tsx";
 import { CommonSubRail } from "../CommonSubRail.tsx";
@@ -81,10 +81,12 @@ export function SelectionRail(p: SelectionRailProps) {
 
   if (p.readOnly)
     return (
-      <nav className="flex w-20 shrink-0 flex-col items-center gap-2 border-r-2 border-slate-100 bg-white py-3 text-center">
-        <Icon.EyeIcon className="text-xl text-slate-400" />
-        <span className="px-1 text-[10px] font-bold leading-tight text-slate-400">View only</span>
-      </nav>
+      <RailShell>
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Icon.EyeIcon className="text-xl text-slate-400" />
+          <span className="px-1 text-[10px] font-bold leading-tight text-slate-400">View only</span>
+        </div>
+      </RailShell>
     );
 
   const conn = p.selectedConn ? p.connections.find((c) => c.id === p.selectedConn) : null;

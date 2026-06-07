@@ -31,13 +31,13 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
   return (
     <div
       ref={ref}
-      className="fixed z-[200] w-56 rounded-lg border-2 border-slate-100 bg-white p-1 shadow-xl"
+      className="fixed z-[200] w-56 rounded-lg border-2 border-line-subtle bg-white p-1 shadow-xl"
       style={{ left: flipX ? undefined : x, right: flipX ? window.innerWidth - x : undefined, top: flipY ? undefined : y, bottom: flipY ? window.innerHeight - y : undefined }}
       onPointerDown={(e) => e.stopPropagation()}
     >
       {items.map((it, i) =>
         it === "separator" ? (
-          <div key={i} className="my-1 border-t-2 border-slate-100" />
+          <div key={i} className="my-1 border-t-2 border-line-subtle" />
         ) : (
           <button
             key={i}

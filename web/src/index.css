@@ -2,11 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/Satoshi-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/Satoshi-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/Satoshi-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Base typography + focus + link treatment lifted from spenny.io-web. */
 body {
   margin: 0;
   font-family:
-    Manrope,
+    Satoshi,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
@@ -43,7 +65,7 @@ body {
     @apply font-bold text-primary rounded hover:text-primary-dark cursor-pointer bg-transparent border-0;
   }
   .field {
-    @apply rounded-lg border-2 border-slate-100 bg-white px-3 py-2 text-xs w-full
+    @apply rounded-lg border-2 border-line-subtle bg-white px-3 py-2 text-xs w-full
       focus:border-primary/30;
   }
   .card {

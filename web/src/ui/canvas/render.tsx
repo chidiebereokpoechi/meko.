@@ -54,9 +54,9 @@ function EdgeLabel({ id, label, editing, readOnly, handle, zoom, onSelect, onLab
           className="w-28 rounded-md border-2 border-primary bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 outline-none"
         />
       ) : readOnly ? (
-        <span className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{label}</span>
+        <span className="whitespace-nowrap rounded-md border-2 border-line-subtle bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{label}</span>
       ) : (
-        <button onClick={() => onSelect(id)} className="whitespace-nowrap rounded-md border-2 border-slate-100 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{label}</button>
+        <button onClick={() => onSelect(id)} className="whitespace-nowrap rounded-md border-2 border-line-subtle bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">{label}</button>
       )}
     </div>
   );

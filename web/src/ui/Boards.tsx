@@ -48,7 +48,7 @@ export function Boards({ activeWs, role, onOpen }: { activeWs: string | null; ro
         ))}
         {canEdit && (
           <button onClick={() => setCreating(true)} className="flex w-28 flex-col items-center gap-2 text-slate-400 hover:text-primary">
-            <span className="grid h-24 w-24 place-items-center rounded-3xl border-2 border-dashed border-slate-300 text-2xl">
+            <span className="grid h-24 w-24 place-items-center rounded-3xl border-2 border-dashed border-line-strong text-2xl">
               <Icon.PlusIcon />
             </span>
             <span className="text-xs font-bold">New board</span>

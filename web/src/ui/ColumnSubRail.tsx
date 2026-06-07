@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Element } from "../types.ts";
 import { Icon } from "./kit/index.ts";
-import { ColorTabs, Popover, RailBtn } from "./NoteSubRail.tsx";
+import { ColorTabs, Popover, RailBtn, RailShell } from "./NoteSubRail.tsx";
 
 type Col = Extract<Element, { type: "column" }>;
 
@@ -40,7 +40,18 @@ export function ColumnSubRail({
   }, [colorOpen]);
 
   return (
-    <nav data-note-rail className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
+    <RailShell
+      deleteRef={deleteRef}
+      deleteActive={deleteActive}
+      onDelete={onDelete}
+      panels={
+        colorOpen && (
+          <Popover top={colorRef.current?.offsetTop ?? 0}>
+            <ColorTabs fill={el.style?.fill} strip={el.style?.strip} onFill={onFill} onStrip={onStrip} />
+          </Popover>
+        )
+      }
+    >
       <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
 
       <div ref={colorRef} className="flex w-full justify-center">
@@ -57,17 +68,6 @@ export function ColumnSubRail({
       </div>
 
       <RailBtn label={el.collapsed ? "Expand" : "Collapse"} active={!!el.collapsed} icon={<Icon.ChevronDown className={el.collapsed ? "-rotate-90" : ""} />} onClick={onToggleCollapse} />
-
-      <span className="flex-1" />
-      <div ref={deleteRef} className="flex w-full justify-center">
-        <RailBtn label="Delete" icon={<Icon.TrashIcon />} dangerActive={deleteActive} onClick={onDelete} />
-      </div>
-
-      {colorOpen && (
-        <Popover top={colorRef.current?.offsetTop ?? 0}>
-          <ColorTabs fill={el.style?.fill} strip={el.style?.strip} onFill={onFill} onStrip={onStrip} />
-        </Popover>
-      )}
-    </nav>
+    </RailShell>
   );
 }

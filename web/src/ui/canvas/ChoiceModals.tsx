@@ -7,13 +7,13 @@ export function UrlChoiceModal({ preview, onPick, onClose }: { preview: Unfurl; 
   const [remember, setRemember] = useState(false);
   return (
     <Modal open onClose={onClose} title="Add as image or link?">
-      {preview.imageUrl && <img src={preview.imageUrl} alt="" className="max-h-40 w-full rounded-lg border-2 border-slate-100 object-cover" />}
+      {preview.imageUrl && <img src={preview.imageUrl} alt="" className="max-h-40 w-full rounded-lg border-2 border-line-subtle object-cover" />}
       {preview.title && <p className="truncate text-xs font-bold text-slate-600">{preview.title}</p>}
       <div className="flex gap-2">
         <Button className="flex-1" onClick={() => onPick("image", remember)}>
           <Icon.ImageIcon className="text-base" /> Image
         </Button>
-        <Button variant="ghost" className="flex-1 border-2 border-slate-200" onClick={() => onPick("link", remember)}>
+        <Button variant="ghost" className="flex-1 border-2 border-line" onClick={() => onPick("link", remember)}>
           <Icon.LinkIcon className="text-base" /> Link
         </Button>
       </div>
@@ -27,12 +27,12 @@ export function EmbedChoiceModal({ embed, onPick, onClose }: { embed: string; on
   const [remember, setRemember] = useState(false);
   return (
     <Modal open onClose={onClose} title="Link or embed?">
-      <iframe src={embed} title="preview" className="h-40 w-full rounded-lg border-2 border-slate-100" style={{ border: 0 }} sandbox="allow-scripts allow-same-origin allow-popups allow-presentation" />
+      <iframe src={embed} title="preview" className="h-40 w-full rounded-lg border-2 border-line-subtle" style={{ border: 0 }} sandbox="allow-scripts allow-same-origin allow-popups allow-presentation" />
       <div className="flex gap-2">
         <Button className="flex-1" onClick={() => onPick("link", remember)}>
           <Icon.LinkIcon className="text-base" /> Link + preview
         </Button>
-        <Button variant="ghost" className="flex-1 border-2 border-slate-200" onClick={() => onPick("embed", remember)}>
+        <Button variant="ghost" className="flex-1 border-2 border-line" onClick={() => onPick("embed", remember)}>
           <Icon.EmbedIcon className="text-base" /> Embed
         </Button>
       </div>
@@ -44,7 +44,7 @@ export function EmbedChoiceModal({ embed, onPick, onClose }: { embed: string; on
 function RememberToggle({ remember, setRemember }: { remember: boolean; setRemember: (v: boolean) => void }) {
   return (
     <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-      <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-2 border-slate-300 accent-primary" />
+      <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-2 border-line-strong accent-primary" />
       Remember my choice
     </label>
   );

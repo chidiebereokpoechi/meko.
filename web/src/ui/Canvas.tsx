@@ -23,7 +23,13 @@ import { SelectionRail } from "./canvas/SelectionRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
 import { NameModal } from "./NameModal.tsx";
 import { type ActiveEditor } from "./EditableNote.tsx";
-import { EMBED_CHOICE_KEY, GRID_DOT_COLOR, URL_CHOICE_KEY, WORLD_H, WORLD_W } from "./canvas/constants.ts";
+import {
+  EMBED_CHOICE_KEY,
+  GRID_DOT_COLOR,
+  URL_CHOICE_KEY,
+  WORLD_H,
+  WORLD_W,
+} from "./canvas/constants.ts";
 import {
   computeLineGeo,
   computeLines,
@@ -93,7 +99,17 @@ export function Canvas({
   const savedRange = useRef<Range | null>(null);
   const [, setTick] = useState(0);
   // Pan/zoom viewport state + helpers (toWorld, clamping, wheel/space) live in useViewport.
-  const { view, panRef, spaceRef, toWorld, viewportCentre, setViewClamped, setZoom, resetView, zoomToFit } = useViewport(viewportRef, surfaceRef);
+  const {
+    view,
+    panRef,
+    spaceRef,
+    toWorld,
+    viewportCentre,
+    setViewClamped,
+    setZoom,
+    resetView,
+    zoomToFit,
+  } = useViewport(viewportRef, surfaceRef);
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [busy, setBusy] = useState(false);
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
@@ -187,7 +203,11 @@ export function Canvas({
     cy: number;
   } | null>(null);
   // Right-click context menu: screen position + the element ids it acts on.
-  const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    ids: string[];
+  } | null>(null);
 
   useEffect(() => {
     const c = new BoardConnection(boardId);
@@ -389,7 +409,10 @@ export function Canvas({
     c.doc.transact(() => {
       for (const e of c.elements.values()) {
         if (e.type === "column" && e.children.some((cid) => all.has(cid))) {
-          c.elements.set(e.id, { ...e, children: e.children.filter((cid) => !all.has(cid)) });
+          c.elements.set(e.id, {
+            ...e,
+            children: e.children.filter((cid) => !all.has(cid)),
+          });
         }
       }
       all.forEach((x) => c.elements.delete(x));
@@ -497,7 +520,7 @@ export function Canvas({
       const ae = document.activeElement as HTMLInputElement | null;
       const editable =
         ae &&
-        ((ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")
+        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
           ? !ae.readOnly && !ae.disabled
           : ae.isContentEditable);
       if (editable) return;
@@ -573,7 +596,6 @@ export function Canvas({
     document.addEventListener("selectionchange", onSel);
     return () => document.removeEventListener("selectionchange", onSel);
   }, []);
-
 
   // Drag from an element's connect ball: track the pointer (world), and on release wire an arrow
   // to whatever element sits under the cursor.
@@ -738,7 +760,11 @@ export function Canvas({
   // Snap a pointer position to the nearest element anchor (corner / edge-mid / centre), else free.
   const snapEndpoint = (clientX: number, clientY: number): LineEndpoint => {
     const w = toWorld(clientX, clientY);
-    const hit = nearestAnchor(w, sizedElements.filter((e) => !childToCol.has(e.id)), 12 / view.zoom);
+    const hit = nearestAnchor(
+      w,
+      sizedElements.filter((e) => !childToCol.has(e.id)),
+      12 / view.zoom,
+    );
     return hit
       ? {
           x: hit.pt.x,
@@ -813,7 +839,6 @@ export function Canvas({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUndo, canRedo, view.zoom, showGrid, boardId]);
-
 
   // Empty-canvas drag: Space/middle-button pans; otherwise draws a marquee selection.
   const onViewportPointerDown = (e: React.PointerEvent) => {
@@ -900,7 +925,9 @@ export function Canvas({
       if (!m.additive) deselect(); // a click on empty canvas (keep selection when modifier held)
     } else {
       // Select TOP-LEVEL elements intersecting the marquee (column children have stale x/y and live
-      // inside their column, so they're excluded). Cmd/Ctrl/Shift adds to the current selection.
+      // inside their column, so they're excluded). Use MEASURED heights (sizedElements) so an
+      // auto-height card like an expanded column is hit across its full rendered height, not its
+      // stale stored h. Cmd/Ctrl/Shift adds to the current selection.
       const a = toWorld(
         Math.min(marquee.x0, marquee.x1),
         Math.min(marquee.y0, marquee.y1),
@@ -909,7 +936,8 @@ export function Canvas({
         Math.max(marquee.x0, marquee.x1),
         Math.max(marquee.y0, marquee.y1),
       );
-      const hits = topElements
+      const hits = sizedElements
+        .filter((el) => !childToCol.has(el.id))
         .filter(
           (el) =>
             el.x < b.x && el.x + el.w > a.x && el.y < b.y && el.y + el.h > a.y,
@@ -937,6 +965,7 @@ export function Canvas({
       h: 120,
       text,
       style: { fill: "#ffffff" },
+      z: nextZ(),
     });
     selectNew(id);
     setEditingId(null);
@@ -956,6 +985,7 @@ export function Canvas({
       title: "",
       items: [{ id: crypto.randomUUID(), text: "", done: false }],
       style: { fill: "#ffffff" },
+      z: nextZ(),
     });
     selectNew(id);
   };
@@ -974,6 +1004,7 @@ export function Canvas({
       title: "",
       children: [],
       style: { fill: "#ffffff" },
+      z: nextZ(),
     });
     selectNew(id);
   };
@@ -1004,7 +1035,8 @@ export function Canvas({
       // pointed at it — otherwise they'd dangle to its old position.
       pruneConnections(new Set([childId]));
       for (const ln of Array.from(c.lines.values())) {
-        if (ln.a.elementId === childId || ln.b.elementId === childId) c.lines.delete(ln.id);
+        if (ln.a.elementId === childId || ln.b.elementId === childId)
+          c.lines.delete(ln.id);
       }
     });
   };
@@ -1032,19 +1064,34 @@ export function Canvas({
     const c = connRef.current;
     if (!c) return;
     let z = nextZ();
-    c.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, z: z++ }); }));
+    c.doc.transact(() =>
+      ids.forEach((id) => {
+        const e = c.elements.get(id);
+        if (e) c.elements.set(id, { ...e, z: z++ });
+      }),
+    );
   };
   const sendToBack = (ids: string[]) => {
     const c = connRef.current;
     if (!c) return;
     let z = Math.min(0, ...elements.map((e) => e.z ?? 0)) - ids.length;
-    c.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, z: z++ }); }));
+    c.doc.transact(() =>
+      ids.forEach((id) => {
+        const e = c.elements.get(id);
+        if (e) c.elements.set(id, { ...e, z: z++ });
+      }),
+    );
   };
   const toggleLock = (ids: string[]) => {
     const c = connRef.current;
     if (!c) return;
     const allLocked = ids.every((id) => c.elements.get(id)?.locked);
-    c.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, locked: !allLocked }); }));
+    c.doc.transact(() =>
+      ids.forEach((id) => {
+        const e = c.elements.get(id);
+        if (e) c.elements.set(id, { ...e, locked: !allLocked });
+      }),
+    );
   };
   // Duplicate elements (offset, on top). Columns deep-copy their children with fresh ids.
   const duplicate = (ids: string[]) => {
@@ -1066,9 +1113,24 @@ export function Canvas({
             map.set(cid, ncid);
             c.elements.set(ncid, { ...ch, id: ncid, z: z++ } as Element);
           }
-          c.elements.set(nid, { ...e, id: nid, x: e.x + 24, y: e.y + 24, z: z++, children: e.children.map((cid) => map.get(cid)).filter(Boolean) as string[] } as Element);
+          c.elements.set(nid, {
+            ...e,
+            id: nid,
+            x: e.x + 24,
+            y: e.y + 24,
+            z: z++,
+            children: e.children
+              .map((cid) => map.get(cid))
+              .filter(Boolean) as string[],
+          } as Element);
         } else {
-          c.elements.set(nid, { ...e, id: nid, x: e.x + 24, y: e.y + 24, z: z++ } as Element);
+          c.elements.set(nid, {
+            ...e,
+            id: nid,
+            x: e.x + 24,
+            y: e.y + 24,
+            z: z++,
+          } as Element);
         }
         fresh.push(nid);
       }
@@ -1081,12 +1143,25 @@ export function Canvas({
   const groupIntoColumn = (ids: string[]) => {
     const c = connRef.current;
     if (!c) return;
-    const els = ids.map((id) => c.elements.get(id)).filter((e): e is Element => !!e && e.type !== "column");
+    const els = ids
+      .map((id) => c.elements.get(id))
+      .filter((e): e is Element => !!e && e.type !== "column");
     if (!els.length) return;
     const minX = Math.min(...els.map((e) => e.x));
     const minY = Math.min(...els.map((e) => e.y));
     const id = crypto.randomUUID();
-    c.elements.set(id, { id, type: "column", x: minX, y: minY, w: 280, h: 120, title: "", children: els.map((e) => e.id), z: nextZ(), style: { fill: "#ffffff" } });
+    c.elements.set(id, {
+      id,
+      type: "column",
+      x: minX,
+      y: minY,
+      w: 280,
+      h: 120,
+      title: "",
+      children: els.map((e) => e.id),
+      z: nextZ(),
+      style: { fill: "#ffffff" },
+    });
     selectNew(id);
   };
 
@@ -1099,7 +1174,11 @@ export function Canvas({
       const e = c.elements.get(id);
       if (!e) continue;
       out.push(structuredClone(e));
-      if (e.type === "column") for (const cid of e.children) { const ch = c.elements.get(cid); if (ch) out.push(structuredClone(ch)); }
+      if (e.type === "column")
+        for (const cid of e.children) {
+          const ch = c.elements.get(cid);
+          if (ch) out.push(structuredClone(ch));
+        }
     }
     clipboardRef.current = out;
   };
@@ -1114,13 +1193,24 @@ export function Canvas({
     const ox = x - clip[0]!.x;
     const oy = y - clip[0]!.y;
     const roots: string[] = [];
-    const childIds = new Set(clip.filter((e) => e.type === "column").flatMap((e) => (e.type === "column" ? e.children : [])));
+    const childIds = new Set(
+      clip
+        .filter((e) => e.type === "column")
+        .flatMap((e) => (e.type === "column" ? e.children : [])),
+    );
     let z = nextZ();
     c.doc.transact(() => {
       for (const e of clip) {
         const nid = idMap.get(e.id)!;
-        const copy: Element = { ...structuredClone(e), id: nid, x: e.x + ox, y: e.y + oy, z: z++ } as Element;
-        if (copy.type === "column") copy.children = copy.children.map((cid) => idMap.get(cid) ?? cid);
+        const copy: Element = {
+          ...structuredClone(e),
+          id: nid,
+          x: e.x + ox,
+          y: e.y + oy,
+          z: z++,
+        } as Element;
+        if (copy.type === "column")
+          copy.children = copy.children.map((cid) => idMap.get(cid) ?? cid);
         c.elements.set(nid, copy);
         if (!childIds.has(e.id)) roots.push(nid);
       }
@@ -1134,14 +1224,21 @@ export function Canvas({
     const src = clipboardRef.current[0];
     if (!src?.style) return;
     const c = connRef.current;
-    c?.doc.transact(() => ids.forEach((id) => { const e = c.elements.get(id); if (e) c.elements.set(id, { ...e, style: { ...e.style, ...src.style } }); }));
+    c?.doc.transact(() =>
+      ids.forEach((id) => {
+        const e = c.elements.get(id);
+        if (e)
+          c.elements.set(id, { ...e, style: { ...e.style, ...src.style } });
+      }),
+    );
   };
   // Rename: drop into edit mode for elements with an editable title/text.
   const renameEl = (id: string) => {
     const e = elementsById.get(id);
     if (!e) return;
     selectId(id);
-    if (e.type === "note" || e.type === "text" || e.type === "todo") setEditingId(id);
+    if (e.type === "note" || e.type === "text" || e.type === "todo")
+      setEditingId(id);
   };
 
   // Open the menu for an element: select it (unless already in a multi-selection), then position.
@@ -1164,27 +1261,69 @@ export function Canvas({
     if (!ids.length) {
       const at = menu ? toWorld(menu.x, menu.y) : viewportCentre();
       return [
-        { label: "Paste", shortcut: "⌘V", disabled: !clipboardRef.current.length, onClick: () => pasteEls(at.x, at.y) },
-        { label: "Select all", onClick: () => setSelectedIds(topElements.map((el) => el.id)) },
+        {
+          label: "Paste",
+          shortcut: "⌘V",
+          disabled: !clipboardRef.current.length,
+          onClick: () => pasteEls(at.x, at.y),
+        },
+        {
+          label: "Select all",
+          onClick: () => setSelectedIds(topElements.map((el) => el.id)),
+        },
       ];
     }
-    const els = ids.map((id) => elementsById.get(id)).filter(Boolean) as Element[];
+    const els = ids
+      .map((id) => elementsById.get(id))
+      .filter(Boolean) as Element[];
     const allLocked = els.length > 0 && els.every((e) => e.locked);
-    const groupable = els.length >= 1 && els.every((e) => e.type !== "column") && ids.every((id) => !childToCol.has(id));
-    const renamable = ids.length === 1 && ["note", "text", "todo", "column"].includes(els[0]?.type ?? "");
+    const groupable =
+      els.length >= 1 &&
+      els.every((e) => e.type !== "column") &&
+      ids.every((id) => !childToCol.has(id));
+    const renamable =
+      ids.length === 1 &&
+      ["note", "text", "todo", "column"].includes(els[0]?.type ?? "");
     return [
       { label: "Copy", shortcut: "⌘C", onClick: () => copyEls(ids) },
-      { label: "Cut", shortcut: "⌘X", onClick: () => { copyEls(ids); removeMany(ids); } },
-      { label: "Paste styles", disabled: !clipboardRef.current[0]?.style, onClick: () => pasteStyles(ids) },
+      {
+        label: "Cut",
+        shortcut: "⌘X",
+        onClick: () => {
+          copyEls(ids);
+          removeMany(ids);
+        },
+      },
+      {
+        label: "Paste styles",
+        disabled: !clipboardRef.current[0]?.style,
+        onClick: () => pasteStyles(ids),
+      },
       { label: "Duplicate", shortcut: "⌘D", onClick: () => duplicate(ids) },
-      ...(renamable ? ([{ label: "Rename", onClick: () => renameEl(ids[0]!) }] as MenuItem[]) : []),
-      ...(groupable ? ([{ label: "Group into column", onClick: () => groupIntoColumn(ids) }] as MenuItem[]) : []),
-      { label: allLocked ? "Unlock position" : "Lock position", onClick: () => toggleLock(ids) },
+      ...(renamable
+        ? ([
+            { label: "Rename", onClick: () => renameEl(ids[0]!) },
+          ] as MenuItem[])
+        : []),
+      ...(groupable
+        ? ([
+            { label: "Group into column", onClick: () => groupIntoColumn(ids) },
+          ] as MenuItem[])
+        : []),
+      {
+        label: allLocked ? "Unlock position" : "Lock position",
+        onClick: () => toggleLock(ids),
+      },
       "separator",
       { label: "Bring to front", onClick: () => bringToFront(ids) },
       { label: "Send to back", onClick: () => sendToBack(ids) },
       "separator",
-      { label: "Delete", shortcut: "⌫", danger: true, onClick: () => removeMany(ids) },
+      {
+        label: "Delete",
+        shortcut: "⌫",
+        danger: true,
+        onClick: () => removeMany(ids),
+      },
     ];
   };
 
@@ -1201,7 +1340,16 @@ export function Canvas({
     const w0 = toWorld(e.clientX, e.clientY);
     const size = { w: spec.w, h: spec.h };
     const fill = spec.fill ?? null;
-    c.elements.set(id, spec.make({ id, x: w0.x - spec.w / 2, y: w0.y - spec.h / 2, w: spec.w, h: spec.h }));
+    c.elements.set(id, {
+      ...spec.make({
+        id,
+        x: w0.x - spec.w / 2,
+        y: w0.y - spec.h / 2,
+        w: spec.w,
+        h: spec.h,
+      }),
+      z: nextZ(),
+    });
     selectNew(id);
     setDraggingId(id);
     const intoColumn = !!spec.nestable; // columns can't nest
@@ -1268,6 +1416,7 @@ export function Canvas({
           boardId: b.id,
           title: b.title,
           style: { fill: "#ffffff" },
+          z: nextZ(),
         });
         selectNew(id);
       }
@@ -1283,7 +1432,7 @@ export function Canvas({
     if (!c) return;
     const id = crypto.randomUUID();
     const { w, h } = embedDefaultSize(src);
-    c.elements.set(id, { id, type: "embed", x, y, w, h, src });
+    c.elements.set(id, { id, type: "embed", x, y, w, h, src, z: nextZ() });
     selectNew(id);
   };
   // Embed tool: raw embed code only — paste an <iframe …> snippet.
@@ -1431,6 +1580,7 @@ export function Canvas({
       description: u.description ?? undefined,
       image: u.imageUrl ?? undefined,
       embedSrc,
+      z: nextZ(),
     });
     selectNew(id);
   };
@@ -1484,7 +1634,7 @@ export function Canvas({
     if (!u.imageUrl) return dropLink(u, url, at); // nothing to choose between
     const remembered = localStorage.getItem(URL_CHOICE_KEY);
     if (remembered === "image")
-      return void createImageUrl(u.imageUrl, at.x, at.y, url, u.title);
+      return void createImageUrl(u.imageUrl, at.x, at.y, url);
     if (remembered === "link") return dropLink(u, url, at);
     setUrlChoice({ u, url, at });
   };
@@ -1500,7 +1650,6 @@ export function Canvas({
         choice.at.x,
         choice.at.y,
         choice.url,
-        choice.u.title,
       );
     else dropLink(choice.u, choice.url, choice.at);
   };
@@ -1555,6 +1704,7 @@ export function Canvas({
         src: displayUrl,
         mediaId,
         alt: file.name,
+        z: nextZ(),
       });
       selectNew(id);
       toast("Image added", "success");
@@ -1574,7 +1724,6 @@ export function Canvas({
     x: number,
     y: number,
     sourceUrl?: string,
-    title?: string | null,
   ): Promise<number> => {
     const c = connRef.current;
     if (!c) return 0;
@@ -1582,10 +1731,9 @@ export function Canvas({
     const width = 280;
     const id = crypto.randomUUID();
     const height = Math.max(40, Math.round((width * h) / w));
-    // Caption is the page title (hyperlinked to the source), falling back to the site name.
-    const text = (title ?? "").trim() || (sourceUrl ? siteName(sourceUrl) : "");
+    // Caption attributes the source page as "from {site}" (hyperlinked to it).
     const caption = sourceUrl
-      ? `<a href="${sourceUrl}">${escapeText(text)}</a>`
+      ? `<a href="${sourceUrl}">${escapeText(`from ${siteName(sourceUrl)}`)}</a>`
       : undefined;
     c.elements.set(id, {
       id,
@@ -1595,6 +1743,7 @@ export function Canvas({
       w: width,
       h: height,
       src,
+      z: nextZ(),
       ...(caption ? { caption, showCaption: true } : {}),
     });
     selectNew(id);
@@ -1998,7 +2147,7 @@ export function Canvas({
 
       <div
         ref={viewportRef}
-        className={`relative flex-1 touch-none overflow-hidden bg-slate-50 ${armLine ? "cursor-crosshair" : ""}`}
+        className={`relative flex-1 touch-none overflow-hidden bg-slate-100 ${armLine ? "cursor-crosshair" : ""}`}
         onPointerDown={onViewportPointerDown}
         onPointerMove={onViewportPointerMove}
         onPointerUp={onViewportPointerUp}
@@ -2027,7 +2176,7 @@ export function Canvas({
             }}
             aria-label="Comments"
             title="Comments"
-            className={`relative grid h-8 w-8 place-items-center rounded-lg border-2 shadow-sm ${showComments ? "border-primary bg-primary text-white" : "border-slate-100 bg-white text-slate-500 hover:text-primary"}`}
+            className={`relative grid h-8 w-8 place-items-center rounded-lg border-2 shadow-sm ${showComments ? "border-primary bg-primary text-white" : "border-line-subtle bg-white text-slate-500 hover:text-primary"}`}
           >
             <Icon.ChatIcon className="text-base" />
             {unreadComments && !showComments && (
@@ -2052,7 +2201,7 @@ export function Canvas({
         )}
         {/* Zoom control */}
         <div
-          className="absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-white px-1 py-1 text-xs font-bold text-slate-500 shadow-sm"
+          className="absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-lg border-2 border-line-subtle bg-white px-1 py-1 text-xs font-bold text-slate-500 shadow-sm"
           onPointerDown={(e) => e.stopPropagation()}
         >
           <button
@@ -2082,7 +2231,9 @@ export function Canvas({
               width: WORLD_W,
               height: WORLD_H,
               transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
-              backgroundImage: showGrid ? `radial-gradient(circle, ${GRID_DOT_COLOR} 1px, transparent 1px)` : undefined,
+              backgroundImage: showGrid
+                ? `radial-gradient(circle, ${GRID_DOT_COLOR} 1px, transparent 1px)`
+                : undefined,
             }}
           >
             {/* Lines render behind elements; handles + labels render above (after the cards). */}
@@ -2201,7 +2352,14 @@ export function Canvas({
         }}
       />
 
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems(menu.ids)}
+          onClose={() => setMenu(null)}
+        />
+      )}
 
       {/* Detached preview of a column child following the cursor while dragging it out. */}
       {childDragGhost && elementsById.get(childDragGhost.id) && (
@@ -2215,5 +2373,3 @@ export function Canvas({
     </div>
   );
 }
-
-

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ColorPicker, Icon } from "./kit/index.ts";
-import { Popover, RailBtn } from "./NoteSubRail.tsx";
+import { Popover, RailBtn, RailShell } from "./NoteSubRail.tsx";
 
 // Structural subset shared by connections and standalone lines.
 type EdgeStyle = { color?: string; dashed?: boolean; weight?: number; label?: string; arrowStart?: boolean; arrowEnd?: boolean };
@@ -46,7 +46,17 @@ export function ConnectionSubRail({
   }, [colorOpen]);
 
   return (
-    <nav data-note-rail className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
+    <RailShell
+      onDelete={onDelete}
+      panels={
+        colorOpen && (
+          <Popover top={colorRef.current?.offsetTop ?? 0}>
+            <div className="mb-2 text-xs font-bold text-slate-400">Line colour</div>
+            <ColorPicker value={conn.color ?? "#475569"} palette={LINE_COLORS} onChange={onColor} />
+          </Popover>
+        )
+      }
+    >
       <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
 
       <div ref={colorRef} className="flex w-full justify-center">
@@ -63,16 +73,6 @@ export function ConnectionSubRail({
       <RailBtn label="Label" active={!!conn.label} icon={<Icon.AlignIcon />} onClick={onLabel} />
       <RailBtn label="Dashed" active={!!conn.dashed} icon={<Icon.DashIcon />} onClick={onToggleDashed} />
       <RailBtn label="Weight" icon={<Icon.WeightIcon />} onClick={onCycleWeight} />
-
-      <span className="flex-1" />
-      <RailBtn label="Delete" icon={<Icon.TrashIcon />} onClick={onDelete} />
-
-      {colorOpen && (
-        <Popover top={colorRef.current?.offsetTop ?? 0}>
-          <div className="mb-2 text-xs font-bold text-slate-400">Line colour</div>
-          <ColorPicker value={conn.color ?? "#475569"} palette={LINE_COLORS} onChange={onColor} />
-        </Popover>
-      )}
-    </nav>
+    </RailShell>
   );
 }

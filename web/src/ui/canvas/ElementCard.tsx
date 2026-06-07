@@ -12,22 +12,24 @@ import { linkHost } from "./url.ts";
 // note-style text-formatting tools.
 function CaptionField({
   html,
-  editing,
+  selected,
   readOnly,
   onText,
   onRegister,
   onFocusCaption,
 }: {
   html: string;
-  editing: boolean;
+  selected: boolean;
   readOnly?: boolean;
   onText: (html: string) => void;
   onRegister: (e: ActiveEditor) => void;
   onFocusCaption: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Editable only on a writable board AND once the card is in edit mode (the second click).
-  const active = editing && !readOnly;
+  // Editable while the card is selected on a writable board — but NOT auto-focused: the user must
+  // click the caption to edit it. That keeps a plain select-then-Delete from typing into the
+  // caption instead of removing the image.
+  const active = selected && !readOnly;
   useEffect(() => {
     if (ref.current) ref.current.innerHTML = sanitizeHtml(html);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -38,18 +40,13 @@ function CaptionField({
     const clean = sanitizeHtml(html);
     if (d.innerHTML !== clean) d.innerHTML = clean;
   });
-  // Focus the caption when the card enters edit mode (second click), mirroring a note.
-  useEffect(() => {
-    if (active && ref.current && document.activeElement !== ref.current)
-      ref.current.focus();
-  }, [active]);
   return (
     <div
       ref={ref}
       contentEditable={active}
       suppressContentEditableWarning
       data-empty-placeholder={readOnly ? "" : "Add a caption"}
-      className="note-editable border-t-2 border-slate-100 p-2 text-xs text-slate-700 outline-none"
+      className="note-editable border-t-2 border-line-strong p-2 text-xs text-slate-700 outline-none"
       // While editing keep the caret from dragging the card; otherwise let the pointer bubble so the
       // first click selects and the second enters edit mode.
       onPointerDown={
@@ -199,7 +196,7 @@ function TodoBody({
               onClick={() => active && toggle(it.id)}
               disabled={!active}
               aria-label={it.done ? "Mark not done" : "Mark done"}
-              className={`grid h-4 w-4 shrink-0 place-items-center rounded border-2 ${it.done ? "border-primary bg-primary text-white" : "border-slate-300"}`}
+              className={`grid h-4 w-4 shrink-0 place-items-center rounded border-2 ${it.done ? "border-primary bg-primary text-white" : "border-line-strong"}`}
             >
               {it.done && <Icon.CheckIcon className="text-[10px]" />}
             </button>
@@ -326,9 +323,9 @@ export function ElementCard({
   const dragged = useRef(false);
   const isText = el.type === "note" || el.type === "text";
   // Element types with an inline editable text zone — these enter edit mode on the second click
-  // (first click just selects), same as a note. Images only when their caption is shown.
-  const editsText =
-    isText || el.type === "todo" || el.type === "column" || (el.type === "image" && !!el.showCaption);
+  // (first click just selects), same as a note. Images are NOT here: clicking an image only selects
+  // it (so Delete removes it); its caption is edited by clicking the caption directly.
+  const editsText = isText || el.type === "todo" || el.type === "column";
 
   // Report rendered height so connection endpoints anchor to the real card edge (auto-height cards).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -474,9 +471,10 @@ export function ElementCard({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
-      // Square corners, constant 2px border (colour swaps on select so there's no layout shift).
+      // Square corners; colour swaps on select so there's no layout shift. Top-level cards get a 2px
+      // border; cards nested inside a column get a lighter 1px border.
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
-      className={`${embedded ? "relative w-full" : "absolute"} border-2 bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-slate-400"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
+      className={`${embedded ? "relative w-full border" : "absolute border-2"} bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-line"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
       style={{
         left: embedded ? undefined : el.x,
         top: embedded ? undefined : el.y,
@@ -554,7 +552,7 @@ export function ElementCard({
           {el.showCaption && (
             <CaptionField
               html={el.caption ?? ""}
-              editing={editing}
+              selected={selected}
               readOnly={readOnly}
               onText={(h) => onCaption?.(h)}
               onRegister={onRegister}
@@ -757,7 +755,7 @@ export function ElementCard({
                 <div className="my-0.5 h-0.5 rounded bg-primary" />
               )}
               {el.children.length === 0 && (
-                <div className="rounded-lg border-2 border-dashed border-slate-200 py-6 text-center text-[11px] text-slate-400">
+                <div className="rounded-lg border-2 border-dashed border-line py-6 text-center text-[11px] text-slate-400">
                   Drag cards here
                 </div>
               )}

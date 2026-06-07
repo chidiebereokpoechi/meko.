@@ -57,8 +57,8 @@ export function CommentsPanel({ boardId, open, signal, onClose }: { boardId: str
   if (!open) return null;
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l-2 border-slate-100 bg-white">
-      <header className="flex items-center justify-between border-b-2 border-slate-100 px-4 py-3">
+    <aside className="flex w-80 shrink-0 flex-col border-l-2 border-line-subtle bg-white">
+      <header className="flex items-center justify-between border-b-2 border-line-subtle px-4 py-3">
         <span className="heading text-sm text-slate-700">Comments</span>
         <button onClick={onClose} aria-label="Close" className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600">
           <Icon.CloseIcon className="text-base" />
@@ -85,7 +85,7 @@ export function CommentsPanel({ boardId, open, signal, onClose }: { boardId: str
         )}
       </div>
 
-      <div className="border-t-2 border-slate-100 p-3">
+      <div className="border-t-2 border-line-subtle p-3">
         <div className="flex items-end gap-2">
           <textarea
             value={draft}
@@ -98,7 +98,7 @@ export function CommentsPanel({ boardId, open, signal, onClose }: { boardId: str
             }}
             rows={1}
             placeholder="Write a comment…"
-            className="max-h-32 min-h-[2.25rem] flex-1 resize-none rounded-lg border-2 border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20 placeholder:font-normal placeholder:text-slate-400"
+            className="max-h-32 min-h-[2.25rem] flex-1 resize-none rounded-lg border-2 border-line bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20 placeholder:font-normal placeholder:text-slate-400"
           />
           <button
             onClick={send}

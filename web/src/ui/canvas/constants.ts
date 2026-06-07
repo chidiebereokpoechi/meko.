@@ -8,4 +8,4 @@ export const URL_CHOICE_KEY = "meko.urlDropChoice"; // image vs link for a paste
 export const EMBED_CHOICE_KEY = "meko.embedDropChoice"; // link-with-preview vs embed for a provider URL
 
 // Dot-grid colour (radial-gradient dot).
-export const GRID_DOT_COLOR = "#b4bccb";
+export const GRID_DOT_COLOR = "#94a3b8";

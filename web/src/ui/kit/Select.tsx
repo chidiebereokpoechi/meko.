@@ -33,11 +33,11 @@ export function Select<T extends string>({
         </label>
       )}
       <Listbox value={value} onChange={onChange} as="div" className="relative">
-        <ListboxButton className="flex w-full items-center justify-between gap-2 rounded-lg border-2 border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 outline-none hover:border-primary/20 focus:border-primary focus:ring-4 focus:ring-primary/20">
+        <ListboxButton className="flex w-full items-center justify-between gap-2 rounded-lg border-2 border-line bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 outline-none hover:border-primary/20 focus:border-primary focus:ring-4 focus:ring-primary/20">
           <span>{current?.label}</span>
           <Icon.ChevronDown className="shrink-0 text-base text-slate-400" />
         </ListboxButton>
-        <ListboxOptions className="absolute left-0 z-[95] mt-1 grid w-full grid-cols-1 divide-y-2 divide-slate-100 overflow-hidden rounded-lg border-2 border-slate-200 bg-slate-50 text-xs shadow-lg outline-none">
+        <ListboxOptions className="absolute left-0 z-[95] mt-1 grid w-full grid-cols-1 divide-y-2 divide-slate-100 overflow-hidden rounded-lg border-2 border-line bg-slate-50 text-xs shadow-lg outline-none">
           {options.map((o) => (
             <ListboxOption
               key={o.value}

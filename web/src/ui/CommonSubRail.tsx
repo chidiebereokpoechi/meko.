@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Element } from "../types.ts";
 import { Icon } from "./kit/index.ts";
-import { ColorTabs, Popover, RailBtn, StripPicker } from "./NoteSubRail.tsx";
+import { ColorTabs, Popover, RailBtn, RailShell, StripPicker } from "./NoteSubRail.tsx";
 
 // Common-settings rail for a multi-selection: shows only settings every selected element supports,
 // applied to all. Every element has a top strip, so Color always shows (strip); Background fill
@@ -49,7 +49,25 @@ export function CommonSubRail({
   const previewActive = canPreview && els.every((e) => e.type === "link" && !e.hideImage);
 
   return (
-    <nav data-note-rail className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
+    <RailShell
+      deleteRef={deleteRef}
+      deleteActive={deleteActive}
+      onDelete={onDelete}
+      panels={
+        colorOpen && (
+          <Popover top={colorRef.current?.offsetTop ?? 0}>
+            {allFill ? (
+              <ColorTabs onFill={onFillAll} onStrip={onStripAll} />
+            ) : (
+              <>
+                <div className="mb-2 text-xs font-bold text-slate-400">Color</div>
+                <StripPicker onChange={onStripAll} />
+              </>
+            )}
+          </Popover>
+        )
+      }
+    >
       <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
 
       <div ref={colorRef} className="flex w-full justify-center">
@@ -63,24 +81,6 @@ export function CommonSubRail({
 
       {canCaption && <RailBtn label="Caption" active={captionActive} icon={<Icon.AlignIcon />} onClick={onToggleCaption} />}
       {canPreview && <RailBtn label="Preview" active={previewActive} icon={<Icon.ImageIcon />} onClick={onTogglePreview} />}
-
-      <span className="flex-1" />
-      <div ref={deleteRef} className="flex w-full justify-center">
-        <RailBtn label="Delete" icon={<Icon.TrashIcon />} dangerActive={deleteActive} onClick={onDelete} />
-      </div>
-
-      {colorOpen && (
-        <Popover top={colorRef.current?.offsetTop ?? 0}>
-          {allFill ? (
-            <ColorTabs onFill={onFillAll} onStrip={onStripAll} />
-          ) : (
-            <>
-              <div className="mb-2 text-xs font-bold text-slate-400">Color</div>
-              <StripPicker onChange={onStripAll} />
-            </>
-          )}
-        </Popover>
-      )}
-    </nav>
+    </RailShell>
   );
 }

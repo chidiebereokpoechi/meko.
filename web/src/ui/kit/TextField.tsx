@@ -26,7 +26,7 @@ export function TextField({
           "rounded-lg border-2 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 outline-none focus:ring-4 placeholder:font-normal placeholder:text-slate-400",
           invalid
             ? "border-red-200 text-red-600 ring-red-600/20 focus:border-red-500 placeholder:text-red-400"
-            : "border-slate-200 ring-primary/20 hover:border-primary/20 focus:border-primary",
+            : "border-line ring-primary/20 hover:border-primary/20 focus:border-primary",
         ].join(" ")}
         placeholder={label}
         {...props}

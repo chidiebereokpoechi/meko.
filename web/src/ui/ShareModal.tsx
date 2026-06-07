@@ -117,7 +117,7 @@ export function ShareModal({
           <Icon.ShareIcon className="text-base" /> Create link
         </Button>
         {fresh && (
-          <div className="flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-slate-50 p-1">
+          <div className="flex items-center gap-1 rounded-lg border-2 border-line-subtle bg-slate-50 p-1">
             <input readOnly value={fresh} className="min-w-0 flex-1 bg-transparent px-2 text-xs text-slate-500 outline-none" />
             <Button variant="ghost" onClick={() => copy(fresh)}>Copy</Button>
           </div>
@@ -126,7 +126,7 @@ export function ShareModal({
 
       {/* Existing links */}
       {active.length > 0 && (
-        <div className="grid gap-1 border-t-2 border-slate-100 pt-3">
+        <div className="grid gap-1 border-t-2 border-line-subtle pt-3">
           <span className="text-xs font-bold text-slate-400">Active links</span>
           {active.map((l) => (
             <div key={l.id} className="flex items-center justify-between gap-2 text-xs text-slate-500">
@@ -142,7 +142,7 @@ export function ShareModal({
 
       {/* Workspace invite */}
       {canInvite && (
-        <div className="grid gap-2 border-t-2 border-slate-100 pt-3">
+        <div className="grid gap-2 border-t-2 border-line-subtle pt-3">
           <span className="text-xs font-bold text-slate-400">Invite to workspace</span>
           <TextField label="Email" name="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <div className="flex items-end gap-2">
@@ -156,7 +156,7 @@ export function ShareModal({
             <Button className="flex-1 border-2 border-transparent" onClick={invite} loading={inviting} disabled={!email.trim()}>Create invite</Button>
           </div>
           {inviteLink && (
-            <div className="flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-slate-50 p-1">
+            <div className="flex items-center gap-1 rounded-lg border-2 border-line-subtle bg-slate-50 p-1">
               <input readOnly value={inviteLink} className="min-w-0 flex-1 bg-transparent px-2 text-xs text-slate-500 outline-none" />
               <Button variant="ghost" onClick={() => copy(inviteLink)}>Copy</Button>
             </div>
@@ -169,7 +169,7 @@ export function ShareModal({
 
 function Segment<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { v: T; label: string }[] }) {
   return (
-    <div className="flex w-full rounded-lg border-2 border-slate-200 p-0.5">
+    <div className="flex w-full rounded-lg border-2 border-line p-0.5">
       {options.map((o) => (
         <button
           key={o.v}

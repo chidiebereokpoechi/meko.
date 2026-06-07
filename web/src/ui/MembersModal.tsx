@@ -102,7 +102,7 @@ export function MembersModal({
   return (
     <Modal open={open} onClose={onClose} title="Members">
       {canManage && (
-        <div className="grid gap-2 border-b-2 border-slate-100 pb-3">
+        <div className="grid gap-2 border-b-2 border-line-subtle pb-3">
           <span className="text-xs font-bold text-slate-400">Invite people</span>
           <TextField label="Email" name="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <div className="flex items-end gap-2">
@@ -110,7 +110,7 @@ export function MembersModal({
             <Button className="flex-1 border-2 border-transparent" onClick={invite} loading={inviting} disabled={!email.trim()}>Create invite</Button>
           </div>
           {inviteLink && (
-            <div className="flex items-center gap-1 rounded-lg border-2 border-slate-100 bg-slate-50 p-1">
+            <div className="flex items-center gap-1 rounded-lg border-2 border-line-subtle bg-slate-50 p-1">
               <input readOnly value={inviteLink} className="min-w-0 flex-1 bg-transparent px-2 text-xs text-slate-500 outline-none" />
               <Button variant="ghost" onClick={() => copy(inviteLink)}>Copy</Button>
             </div>
@@ -142,7 +142,7 @@ export function MembersModal({
       </div>
 
       {canManage && invites.length > 0 && (
-        <div className="grid gap-1 border-t-2 border-slate-100 pt-3">
+        <div className="grid gap-1 border-t-2 border-line-subtle pt-3">
           <span className="text-xs font-bold text-slate-400">Pending invites</span>
           {invites.map((i) => (
             <div key={i.id} className="flex items-center justify-between gap-2 text-xs">

@@ -55,14 +55,14 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
 
   return (
     <div className="grid h-screen place-items-center bg-slate-100">
-      <form className="flex w-80 flex-col gap-4 rounded-xl border-2 border-slate-100 bg-white px-8 py-9" onSubmit={submit}>
+      <form className="flex w-80 flex-col gap-4 rounded-xl border-2 border-line-subtle bg-white px-8 py-9" onSubmit={submit}>
         <div>
           <h1 className="heading text-2xl text-primary">meko.</h1>
           <p className="mt-1 text-slate-400">Sign in to your boards</p>
         </div>
         <a
           href={oidcUrl}
-          className="flex items-center justify-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+          className="flex items-center justify-center gap-2 rounded-lg border-2 border-line bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
         >
           <GoogleG /> Continue with Google
         </a>

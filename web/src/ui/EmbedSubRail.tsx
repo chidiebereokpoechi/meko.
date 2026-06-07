@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Element } from "../types.ts";
 import { Icon } from "./kit/index.ts";
-import { Popover, RailBtn, StripPicker } from "./NoteSubRail.tsx";
+import { Popover, RailBtn, RailShell, StripPicker } from "./NoteSubRail.tsx";
 
 type Embed = Extract<Element, { type: "embed" }>;
 
@@ -36,7 +36,19 @@ export function EmbedSubRail({
   }, [colorOpen]);
 
   return (
-    <nav data-note-rail className="relative flex w-20 shrink-0 flex-col items-center gap-1 border-r-2 border-slate-100 bg-white py-3">
+    <RailShell
+      deleteRef={deleteRef}
+      deleteActive={deleteActive}
+      onDelete={onDelete}
+      panels={
+        colorOpen && (
+          <Popover top={colorRef.current?.offsetTop ?? 0}>
+            <div className="mb-2 text-xs font-bold text-slate-400">Color</div>
+            <StripPicker value={el.style?.strip} onChange={onStrip} />
+          </Popover>
+        )
+      }
+    >
       <RailBtn label="Done" icon={<Icon.ArrowLeftIcon />} onClick={onDone} />
 
       <div ref={colorRef} className="flex w-full justify-center">
@@ -51,18 +63,6 @@ export function EmbedSubRail({
           onClick={() => setColorOpen((o) => !o)}
         />
       </div>
-
-      <span className="flex-1" />
-      <div ref={deleteRef} className="flex w-full justify-center">
-        <RailBtn label="Delete" icon={<Icon.TrashIcon />} dangerActive={deleteActive} onClick={onDelete} />
-      </div>
-
-      {colorOpen && (
-        <Popover top={colorRef.current?.offsetTop ?? 0}>
-          <div className="mb-2 text-xs font-bold text-slate-400">Color</div>
-          <StripPicker value={el.style?.strip} onChange={onStrip} />
-        </Popover>
-      )}
-    </nav>
+    </RailShell>
   );
 }
