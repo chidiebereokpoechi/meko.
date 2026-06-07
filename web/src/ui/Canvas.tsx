@@ -2,11 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { resolveMedia } from "../lib/media.ts";
 import type { Connection, Element, LineShape } from "../types.ts";
-import { Badge, ContextMenu, Icon, type MenuItem } from "./kit/index.ts";
+import { ContextMenu, Icon, type MenuItem } from "./kit/index.ts";
 import { type Tool } from "./layout/ToolRail.tsx";
 import { SelectionRail } from "./canvas/SelectionRail.tsx";
 import { CommentsPanel } from "./CommentsPanel.tsx";
-import { NameModal } from "./NameModal.tsx";
 import { type ActiveEditor } from "./EditableNote.tsx";
 import { GRID_DOT_COLOR, WORLD_H, WORLD_W } from "./canvas/constants.ts";
 import {
@@ -16,7 +15,8 @@ import {
   LineOverlay,
   PeerCursor,
 } from "./canvas/render.tsx";
-import { EmbedChoiceModal, UrlChoiceModal } from "./canvas/ChoiceModals.tsx";
+import { CanvasModals } from "./canvas/CanvasModals.tsx";
+import { CanvasChrome } from "./canvas/CanvasChrome.tsx";
 import { ElementCard } from "./canvas/ElementCard.tsx";
 import { useViewport } from "./canvas/useViewport.ts";
 import { useEdges } from "./canvas/useEdges.ts";
@@ -1131,64 +1131,26 @@ export function Canvas({
         deselect={deselect}
         onOpenBoard={onOpenBoard}
       />
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={onPickImage}
+      <CanvasModals
+        fileRef={fileRef}
+        onPickImage={onPickImage}
+        linkModal={linkModal}
+        boardModal={boardModal}
+        embedModal={embedModal}
+        setLinkModal={setLinkModal}
+        setBoardModal={setBoardModal}
+        setEmbedModal={setEmbedModal}
+        cancelFill={cancelFill}
+        createLink={createLink}
+        createBoardElement={createBoardElement}
+        createEmbed={createEmbed}
+        urlChoice={urlChoice}
+        embedChoice={embedChoice}
+        applyUrlChoice={applyUrlChoice}
+        applyEmbedChoice={applyEmbedChoice}
+        setUrlChoice={setUrlChoice}
+        setEmbedChoice={setEmbedChoice}
       />
-      <NameModal
-        open={!!linkModal}
-        title="Add a link"
-        label="Paste a URL"
-        submitLabel="Add"
-        onClose={() => {
-          setLinkModal(null);
-          cancelFill("link");
-        }}
-        onSubmit={createLink}
-      />
-
-      <NameModal
-        open={!!boardModal}
-        title="New board"
-        label="Board title"
-        submitLabel="Create"
-        onClose={() => {
-          setBoardModal(null);
-          cancelFill("board");
-        }}
-        onSubmit={createBoardElement}
-      />
-
-      <NameModal
-        open={!!embedModal}
-        title="Embed code"
-        label="Paste an <iframe> embed snippet"
-        submitLabel="Embed"
-        onClose={() => {
-          setEmbedModal(null);
-          cancelFill("embed");
-        }}
-        onSubmit={createEmbed}
-      />
-
-      {urlChoice && (
-        <UrlChoiceModal
-          preview={urlChoice.u}
-          onPick={applyUrlChoice}
-          onClose={() => setUrlChoice(null)}
-        />
-      )}
-
-      {embedChoice && (
-        <EmbedChoiceModal
-          embed={embedChoice.embed}
-          onPick={applyEmbedChoice}
-          onClose={() => setEmbedChoice(null)}
-        />
-      )}
 
       <div
         ref={viewportRef}
@@ -1211,67 +1173,21 @@ export function Canvas({
           importDrop(e);
         }}
       >
-        <div
-          className="absolute right-4 top-4 z-30 flex items-center gap-2"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <Badge tone={status === "online" ? "green" : "slate"}>{status}</Badge>
-          <button
-            onClick={() => {
-              const next = !showComments;
-              setShowComments(next);
-              showCommentsRef.current = next;
-              if (next) setUnreadComments(false);
-            }}
-            aria-label="Comments"
-            title="Comments"
-            className={`relative grid h-8 w-8 place-items-center rounded-lg border-2 shadow-sm ${showComments ? "border-primary bg-primary text-white" : "border-line-subtle bg-white text-slate-500 hover:text-primary"}`}
-          >
-            <Icon.ChatIcon className="text-base" />
-            {unreadComments && !showComments && (
-              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-primary" />
-            )}
-          </button>
-        </div>
-        {dragOver && (
-          <div className="pointer-events-none absolute inset-0 z-20 m-2 rounded-xl border-2 border-dashed border-primary bg-primary/5" />
-        )}
-        {/* Marquee selection rectangle (screen coords). */}
-        {marquee && (
-          <div
-            className="pointer-events-none fixed z-40 rounded border-2 border-primary bg-primary/10"
-            style={{
-              left: Math.min(marquee.x0, marquee.x1),
-              top: Math.min(marquee.y0, marquee.y1),
-              width: Math.abs(marquee.x1 - marquee.x0),
-              height: Math.abs(marquee.y1 - marquee.y0),
-            }}
-          />
-        )}
-        {/* Zoom control */}
-        <div
-          className="absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-lg border-2 border-line-subtle bg-white px-1 py-1 text-xs font-bold text-slate-500 shadow-sm"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <button
-            className="h-6 w-6 rounded hover:bg-slate-100"
-            onClick={() => setZoom(view.zoom / 1.2)}
-          >
-            −
-          </button>
-          <button
-            className="w-12 rounded hover:bg-slate-100"
-            onClick={() => setZoom(1)}
-          >
-            {Math.round(view.zoom * 100)}%
-          </button>
-          <button
-            className="h-6 w-6 rounded hover:bg-slate-100"
-            onClick={() => setZoom(view.zoom * 1.2)}
-          >
-            +
-          </button>
-        </div>
+        <CanvasChrome
+          status={status}
+          showComments={showComments}
+          unreadComments={unreadComments}
+          onToggleComments={() => {
+            const next = !showComments;
+            setShowComments(next);
+            showCommentsRef.current = next;
+            if (next) setUnreadComments(false);
+          }}
+          dragOver={dragOver}
+          marquee={marquee}
+          zoom={view.zoom}
+          onZoom={setZoom}
+        />
         <div className="h-full w-full">
           <div
             ref={surfaceRef}
