@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { BoardConnection } from "../../lib/board.ts";
-import { uploadImage } from "../../lib/media.ts";
+import { importImage, uploadImage } from "../../lib/media.ts";
 import { requestExport } from "../../lib/exports.ts";
 import { type Unfurl, unfurlLink } from "../../lib/links.ts";
 import { api } from "../../lib/api.ts";
@@ -432,6 +432,7 @@ export function useImport(deps: {
     const c = connRef.current;
     if (!c) return;
     const built: Element[] = [];
+    const imageSrcById: { id: string; src: string }[] = [];
     for (const it of mn.items) {
       const id = crypto.randomUUID();
       if (it.kind === "image") {
@@ -439,6 +440,7 @@ export function useImport(deps: {
         const width = 280;
         const height = Math.max(40, Math.round((width * h) / w));
         const caption = it.caption ? sanitizeHtml(it.caption) : undefined;
+        imageSrcById.push({ id, src: it.src });
         built.push({
           id,
           type: "image",
@@ -446,7 +448,7 @@ export function useImport(deps: {
           y: at.y,
           w: width,
           h: height,
-          src: it.src,
+          src: it.src, // external URL; swapped to a meko mediaId once imported (below)
           ...(caption ? { caption, showCaption: true } : {}),
         } as Element);
       } else if (it.kind === "todo") {
@@ -514,6 +516,14 @@ export function useImport(deps: {
         });
     });
     selectNew(colId ?? built[0]!.id);
+
+    // Copy the (external) images into meko storage in the background so the paste appears instantly;
+    // swap each element to its meko mediaId once stored (display derivative resolves via the media
+    // effect). On failure the element keeps its external URL.
+    for (const { id, src } of imageSrcById)
+      importImage(boardId, src)
+        .then((mediaId) => patch(id, { mediaId } as Partial<Element>))
+        .catch(() => {});
   };
 
   // Build element creators from clipboard/drop data and lay them out in a column. Handles multiple

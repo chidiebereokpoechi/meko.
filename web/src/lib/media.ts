@@ -25,6 +25,19 @@ export async function uploadImage(boardId: string, file: File): Promise<{ mediaI
   throw new Error("media processing timed out");
 }
 
+// Import an external image URL into meko storage (server-side fetch + transcode). Returns the new
+// mediaId; the display derivative is produced asynchronously (resolve it like any uploaded media).
+export async function importImage(
+  boardId: string,
+  url: string,
+): Promise<string> {
+  const { mediaId } = await api<{ mediaId: string }>(
+    `/api/boards/${boardId}/media/import`,
+    { method: "POST", body: JSON.stringify({ url }) },
+  );
+  return mediaId;
+}
+
 // Re-resolve a fresh presigned display URL for a stored mediaId (the URL baked into an element
 // expires). Returns null if not ready / not found.
 export async function resolveMedia(mediaId: string): Promise<string | null> {
