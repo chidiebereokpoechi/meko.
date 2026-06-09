@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>clipboard debug</title>
+    <style>
+      body {
+        font:
+          13px/1.4 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        margin: 24px;
+        color: #0f172a;
+      }
+      h1 {
+        font-size: 16px;
+      }
+      .hint {
+        color: #475569;
+      }
+      .type {
+        margin-top: 18px;
+        font-weight: 700;
+        color: #6e24ff;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #f1f5f9;
+        border: 2px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 6px 0 0;
+      }
+      img {
+        max-width: 200px;
+        display: block;
+        margin-top: 6px;
+        border: 2px solid #cbd5e1;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>clipboard debug</h1>
+    <p class="hint">
+      Copy something in Milanote (e.g. a column), then click this page and press
+      ⌘V / Ctrl+V. Every clipboard type + its contents is dumped below. Copy the
+      whole output and send it back.
+    </p>
+    <div id="out"></div>
+    <script>
+      const out = document.getElementById("out");
+      document.addEventListener("paste", (e) => {
+        out.innerHTML = "";
+        const dt = e.clipboardData;
+        const types = Array.from(dt.types || []);
+        const head = document.createElement("pre");
+        head.textContent = "types: " + JSON.stringify(types);
+        out.appendChild(head);
+        for (const t of types) {
+          const label = document.createElement("div");
+          label.className = "type";
+          label.textContent = t;
+          out.appendChild(label);
+          const pre = document.createElement("pre");
+          try {
+            pre.textContent = dt.getData(t);
+          } catch (err) {
+            pre.textContent = "(getData failed: " + err + ")";
+          }
+          out.appendChild(pre);
+        }
+        const files = Array.from(dt.files || []);
+        if (files.length) {
+          const label = document.createElement("div");
+          label.className = "type";
+          label.textContent = "files (" + files.length + ")";
+          out.appendChild(label);
+          for (const f of files) {
+            const pre = document.createElement("pre");
+            pre.textContent = f.name + " — " + f.type + " — " + f.size + " bytes";
+            out.appendChild(pre);
+            if (f.type.startsWith("image/")) {
+              const img = document.createElement("img");
+              img.src = URL.createObjectURL(f);
+              out.appendChild(img);
+            }
+          }
+        }
+        e.preventDefault();
+      });
+    </script>
+  </body>
+</html>

@@ -22,6 +22,9 @@ import {
   siteName,
 } from "./url.ts";
 import { TOOL_SPECS } from "./tools.ts";
+import { deserializeElements, parseMilanoteHtml } from "./clipboard.ts";
+import { startPointerDrag } from "./drag.ts";
+import { sanitizeHtml } from "../../lib/sanitize.ts";
 
 type Pt = { x: number; y: number };
 type Coords = { id: string; kind: "image" | "link" | "embed" | "board" };
@@ -50,10 +53,15 @@ export function useImport(deps: {
     excludeId?: string,
   ) => { colId: string; index: number } | null;
   moveChildToColumn: (childId: string, colId: string, index: number) => void;
-  setMediaUrls: (fn: (m: Record<string, string>) => Record<string, string>) => void;
+  setMediaUrls: (
+    fn: (m: Record<string, string>) => Record<string, string>,
+  ) => void;
   fileRef: React.RefObject<HTMLInputElement | null>;
   fillRef: React.MutableRefObject<Coords | null>;
   dropCoords: React.MutableRefObject<Pt | null>;
+  // Paste a list of elements near (x,y) — fed elements parsed from the OS clipboard (a meko copy,
+  // same app or another board/tab).
+  pasteElements: (els: Element[], x: number, y: number) => void;
 }) {
   const {
     connRef,
@@ -75,6 +83,7 @@ export function useImport(deps: {
     fileRef,
     fillRef,
     dropCoords,
+    pasteElements,
   } = deps;
 
   const [busy, setBusy] = useState(false);
@@ -175,30 +184,34 @@ export function useImport(deps: {
     selectNew(id);
     setDraggingId(id);
     const intoColumn = !!spec.nestable; // columns can't nest
-    const move = (ev: PointerEvent) => {
-      const w = toWorld(ev.clientX, ev.clientY);
-      patch(id, { x: w.x - size.w / 2, y: w.y - size.h / 2 });
-      setColDrop(intoColumn ? columnDropAt(ev.clientX, ev.clientY, id) : null);
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setDraggingId(null);
-      setColDrop(null);
-      // Dropped onto a column → add as a child.
-      if (intoColumn) {
-        const drop = columnDropAt(ev.clientX, ev.clientY, id);
-        if (drop) moveChildToColumn(id, drop.colId, drop.index);
-      }
-      if (!fill) return;
-      fillRef.current = { id, kind: fill };
-      if (fill === "image") fileRef.current?.click();
-      else if (fill === "link") setLinkModal({ x: 0, y: 0 });
-      else if (fill === "embed") setEmbedModal({ x: 0, y: 0 });
-      else if (fill === "board") setBoardModal({ x: 0, y: 0 });
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) => {
+        const w = toWorld(ev.clientX, ev.clientY);
+        patch(id, { x: w.x - size.w / 2, y: w.y - size.h / 2 });
+        setColDrop(intoColumn ? columnDropAt(ev.clientX, ev.clientY, id) : null);
+      },
+      onUp: (ev) => {
+        setDraggingId(null);
+        setColDrop(null);
+        // Dropped onto a column → add as a child.
+        if (intoColumn) {
+          const drop = columnDropAt(ev.clientX, ev.clientY, id);
+          if (drop) moveChildToColumn(id, drop.colId, drop.index);
+        }
+        if (!fill) return;
+        fillRef.current = { id, kind: fill };
+        if (fill === "image") fileRef.current?.click();
+        else if (fill === "link") setLinkModal({ x: 0, y: 0 });
+        else if (fill === "embed") setEmbedModal({ x: 0, y: 0 });
+        else if (fill === "board") setBoardModal({ x: 0, y: 0 });
+      },
+      // Esc: abandon placement — remove the just-spawned placeholder.
+      onCancel: () => {
+        setDraggingId(null);
+        setColDrop(null);
+        connRef.current?.elements.delete(id);
+      },
+    });
   };
   // Remove an unfilled placeholder when its fill dialog is dismissed.
   const cancelFill = (kind: "image" | "link" | "embed" | "board") => {
@@ -285,7 +298,11 @@ export function useImport(deps: {
     if (!c) return;
     const id = crypto.randomUUID();
     const w = embedSrc ? 360 : 260;
-    const previewH = embedSrc ? embedHeightFor(embedSrc, w) : u.imageUrl ? 230 : 0;
+    const previewH = embedSrc
+      ? embedHeightFor(embedSrc, w)
+      : u.imageUrl
+        ? 230
+        : 0;
     c.elements.set(id, {
       id,
       type: "link",
@@ -388,7 +405,7 @@ export function useImport(deps: {
     const id = crypto.randomUUID();
     const height = Math.max(40, Math.round((width * h) / w));
     const caption = sourceUrl
-      ? `<a href="${sourceUrl}">${escapeText(`from ${siteName(sourceUrl)}`)}</a>`
+      ? `From <a href="${sourceUrl}">${escapeText(`${siteName(sourceUrl)}`)}</a>`
       : undefined;
     c.elements.set(id, {
       id,
@@ -405,6 +422,84 @@ export function useImport(deps: {
     return height + (caption ? 40 : 0);
   };
 
+  // Recreate a copied Milanote selection at high fidelity: its image cards (with captions) and text
+  // cards become meko images/notes, wrapped in a column (titled when Milanote gave one) so the
+  // grouping is preserved. External HTML is sanitised before it touches the board.
+  const importMilanote = async (
+    mn: NonNullable<ReturnType<typeof parseMilanoteHtml>>,
+    at: Pt,
+  ) => {
+    const c = connRef.current;
+    if (!c) return;
+    const built: Element[] = [];
+    for (const it of mn.items) {
+      const id = crypto.randomUUID();
+      if (it.kind === "image") {
+        const { w, h } = await loadImageSize(it.src);
+        const width = 280;
+        const height = Math.max(40, Math.round((width * h) / w));
+        const caption = it.caption ? sanitizeHtml(it.caption) : undefined;
+        built.push({
+          id,
+          type: "image",
+          x: at.x,
+          y: at.y,
+          w: width,
+          h: height,
+          src: it.src,
+          ...(caption ? { caption, showCaption: true } : {}),
+        } as Element);
+      } else if (it.kind === "link") {
+        const w = it.embedSrc ? 360 : 260;
+        const previewH = it.embedSrc ? embedHeightFor(it.embedSrc, w) : 0;
+        built.push({
+          id,
+          type: "link",
+          x: at.x,
+          y: at.y,
+          w,
+          h: previewH + 96,
+          url: it.url,
+          ...(it.title ? { title: it.title } : {}),
+          ...(it.embedSrc ? { embedSrc: it.embedSrc } : {}),
+        } as Element);
+      } else {
+        built.push({
+          id,
+          type: "note",
+          x: at.x,
+          y: at.y,
+          w: 220,
+          h: 120,
+          text: sanitizeHtml(it.html),
+          style: { fill: "#ffffff" },
+        } as Element);
+      }
+    }
+    if (!built.length || !connRef.current) return;
+    // Wrap in a column when Milanote gave a column (title) or there are several cards.
+    const wrap = mn.title !== null || built.length > 1;
+    const colId = wrap ? crypto.randomUUID() : null;
+    c.doc.transact(() => {
+      let z = nextZ();
+      for (const ch of built) c.elements.set(ch.id, { ...ch, z: z++ } as Element);
+      if (colId)
+        c.elements.set(colId, {
+          id: colId,
+          type: "column",
+          x: at.x,
+          y: at.y,
+          w: 280,
+          h: 120,
+          title: mn.title ?? "",
+          children: built.map((b) => b.id),
+          style: { fill: "#ffffff" },
+          z: z++,
+        });
+    });
+    selectNew(colId ?? built[0]!.id);
+  };
+
   // Build element creators from clipboard/drop data and lay them out in a column. Handles multiple
   // items (image files, or an HTML payload with several images/links/embeds). Returns true if handled.
   const dropClipboard = (
@@ -416,19 +511,46 @@ export function useImport(deps: {
     const makers: Array<(x: number, y: number) => Promise<number> | number> =
       [];
     for (const f of files) makers.push((x, y) => addImageFile(f, x, y));
-    const firstTok = text.split(/\s+/)[0] ?? "";
     if (!files.length) {
+      // A copied Milanote selection: rebuild its cards (images + notes) as a meko column.
+      const mn = parseMilanoteHtml(html);
+      if (mn) {
+        void importMilanote(mn, start ?? viewportCentre());
+        return true;
+      }
       const iframeSrc = extractIframeSrc(text);
+      const isUrl = (l: string) => /^https?:\/\/\S+$/i.test(l);
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const urlLines = lines.filter(isUrl);
       if (iframeSrc) {
         makers.push((x, y) => {
           dropEmbed(iframeSrc, x, y);
           return embedHeightFor(iframeSrc, 360);
         });
-      } else if (/^https?:\/\//i.test(firstTok)) {
+      } else if (lines.length === 1 && urlLines.length === 1) {
         const at = start ?? viewportCentre();
-        void handleUrl(firstTok, at.x, at.y); // single URL — may prompt image/link or embed
+        void handleUrl(lines[0]!, at.x, at.y); // single URL — may prompt image/link or embed
         return true;
+      } else if (urlLines.length) {
+        // Multiple text/plain lines with URLs (e.g. a copied Milanote column): one media element per
+        // URL line, plus a single note for the remaining non-URL text.
+        for (const l of lines) {
+          if (isUrl(l))
+            makers.push((x, y) =>
+              isImageUrl(l) ? createImageUrl(l, x, y) : makeLinkAt(l, x, y),
+            );
+        }
+        const noteText = lines.filter((l) => !isUrl(l)).join("\n").trim();
+        if (noteText)
+          makers.push((x, y) => {
+            createNote(x, y, noteText.slice(0, 10000));
+            return 140;
+          });
       } else {
+        // No URLs in text/plain: take media from the HTML payload, else drop a plain note.
         const items = parseClipboardHtmlAll(html);
         if (items.length) {
           for (const it of items) {
@@ -527,7 +649,12 @@ export function useImport(deps: {
     if (!choice) return;
     if (remember) localStorage.setItem(URL_CHOICE_KEY, kind);
     if (kind === "image" && choice.u.imageUrl)
-      void createImageUrl(choice.u.imageUrl, choice.at.x, choice.at.y, choice.url);
+      void createImageUrl(
+        choice.u.imageUrl,
+        choice.at.x,
+        choice.at.y,
+        choice.url,
+      );
     else dropLink(choice.u, choice.url, choice.at);
   };
 
@@ -634,6 +761,16 @@ export function useImport(deps: {
         return;
       const dt = e.clipboardData;
       if (!dt) return;
+      // A meko element copy (same app, or another board/tab) rides on the OS clipboard as a text/html
+      // marker. The OS clipboard is the single source of truth, so an external copy — which replaces
+      // the clipboard — naturally wins over a previously-copied meko element.
+      const meko = deserializeElements(dt.getData("text/html"));
+      if (meko) {
+        const at = viewportCentre();
+        pasteElements(meko, at.x, at.y);
+        e.preventDefault();
+        return;
+      }
       // Read all image files synchronously (clipboard items expire after the event).
       const files = Array.from(dt.items)
         .filter((it) => it.kind === "file" && it.type.startsWith("image/"))

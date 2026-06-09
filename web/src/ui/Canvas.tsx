@@ -17,6 +17,7 @@ import {
 } from "./canvas/render.tsx";
 import { CanvasModals } from "./canvas/CanvasModals.tsx";
 import { CanvasChrome } from "./canvas/CanvasChrome.tsx";
+import { serializeElements } from "./canvas/clipboard.ts";
 import { ElementCard } from "./canvas/ElementCard.tsx";
 import { useViewport } from "./canvas/useViewport.ts";
 import { useEdges } from "./canvas/useEdges.ts";
@@ -233,6 +234,7 @@ export function Canvas({
     beginLineDraw,
     updateLineDraw,
     commitLineDraw,
+    cancelLineDraw,
   } = edges;
   // Single-element ops/rails use selectedId (only when exactly one is selected); marquee can
   // select many.
@@ -405,6 +407,12 @@ export function Canvas({
     setOverDelete(false);
     setColDrop(null);
   };
+  // Esc during a card move: the card reverts its own position; clear the canvas drag affordances.
+  const handleDragCancel = () => {
+    setDraggingId(null);
+    setOverDelete(false);
+    setColDrop(null);
+  };
 
   // Backspace/Delete removes the selected element — unless a text field is focused (editing).
   useEffect(() => {
@@ -435,6 +443,69 @@ export function Canvas({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedIds, editingId, readOnly, selectedLine, selectedConn]);
+
+  // Copy/cut handling. With elements selected (and not editing text), copy them to the internal
+  // clipboard and preventDefault — this stops the browser from copying a selected image's caption
+  // text, and paste then duplicates the element (see useImport's paste listener). Any OTHER copy
+  // (text selection, editing a field) clears the internal clipboard, so the next paste falls back to
+  // the OS clipboard — i.e. copying real text after copying an element pastes the text again.
+  useEffect(() => {
+    const editableTarget = () => {
+      const ae = document.activeElement as HTMLInputElement | null;
+      return !!(
+        ae &&
+        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
+          ? !ae.readOnly && !ae.disabled
+          : ae.isContentEditable)
+      );
+    };
+    const elementCopy = () =>
+      !readOnly && !editingId && !editableTarget() && selectedIds.length > 0;
+    // Copy elements to the internal clipboard AND the OS clipboard (so they paste into another
+    // board/tab), then preventDefault so the browser doesn't copy a selected image's caption text.
+    const writeOsClipboard = (e: ClipboardEvent) => {
+      const { html, text } = serializeElements(clipboardRef.current);
+      e.clipboardData?.setData("text/html", html);
+      e.clipboardData?.setData("text/plain", text);
+    };
+    const onCopy = (e: ClipboardEvent) => {
+      if (!elementCopy()) return void (clipboardRef.current = []);
+      copyEls(selectedIds);
+      writeOsClipboard(e);
+      e.preventDefault();
+    };
+    const onCut = (e: ClipboardEvent) => {
+      if (!elementCopy()) return void (clipboardRef.current = []);
+      copyEls(selectedIds);
+      writeOsClipboard(e);
+      removeMany(selectedIds);
+      e.preventDefault();
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCut);
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCut);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, editingId, readOnly]);
+
+  // Esc cancels an in-progress marquee or line-draw. (The pointer drags that use window listeners —
+  // element move, tool placement, column-child, arrow/line endpoints — handle their own Esc via
+  // startPointerDrag.)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (marqueeRef.current || marquee) {
+        marqueeRef.current = null;
+        setMarquee(null);
+      }
+      if (lineDraw) cancelLineDraw();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marquee, lineDraw]);
 
   // Undo/redo hotkeys: ⌘/Ctrl+Z, and ⌘/Ctrl+Y or ⇧⌘/Ctrl+Z. Skipped while typing so the browser
   // handles in-note text undo instead.
@@ -516,6 +587,9 @@ export function Canvas({
 
   // Empty-canvas drag: Space/middle-button pans; otherwise draws a marquee selection.
   const onViewportPointerDown = (e: React.PointerEvent) => {
+    // Release keyboard focus trapped in an activated embed iframe so key handlers work again.
+    if (document.activeElement instanceof HTMLIFrameElement)
+      document.activeElement.blur();
     if (armLine) {
       // Line tool armed: press = start point (snapped), drag to end.
       beginLineDraw(e.clientX, e.clientY);
@@ -601,6 +675,64 @@ export function Canvas({
     setMarquee(null);
   };
 
+  // Copy elements (deep, with column children) into the internal clipboard. Defined before useImport
+  // so the paste listener there can prefer internal elements over the OS clipboard.
+  const copyEls = (ids: string[]) => {
+    const c = connRef.current;
+    if (!c) return;
+    const out: Element[] = [];
+    for (const id of ids) {
+      const e = c.elements.get(id);
+      if (!e) continue;
+      out.push(structuredClone(e));
+      if (e.type === "column")
+        for (const cid of e.children) {
+          const ch = c.elements.get(cid);
+          if (ch) out.push(structuredClone(ch));
+        }
+    }
+    clipboardRef.current = out;
+  };
+  // Paste a list of elements with fresh ids near (x,y), remapping column children. The source can be
+  // the internal clipboard (same-app) or elements deserialized from the OS clipboard (another tab).
+  const pasteElements = (clip: Element[], x: number, y: number) => {
+    const c = connRef.current;
+    if (!c || !clip.length) return;
+    const idMap = new Map<string, string>();
+    for (const e of clip) idMap.set(e.id, crypto.randomUUID());
+    // Anchor the paste so the first element lands at (x,y).
+    const ox = x - clip[0]!.x;
+    const oy = y - clip[0]!.y;
+    const roots: string[] = [];
+    const childIds = new Set(
+      clip
+        .filter((e) => e.type === "column")
+        .flatMap((e) => (e.type === "column" ? e.children : [])),
+    );
+    let z = nextZ();
+    c.doc.transact(() => {
+      for (const e of clip) {
+        const nid = idMap.get(e.id)!;
+        const copy: Element = {
+          ...structuredClone(e),
+          id: nid,
+          x: e.x + ox,
+          y: e.y + oy,
+          z: z++,
+        } as Element;
+        if (copy.type === "column")
+          copy.children = copy.children.map((cid) => idMap.get(cid) ?? cid);
+        c.elements.set(nid, copy);
+        if (!childIds.has(e.id)) roots.push(nid);
+      }
+    });
+    setSelectedIds(roots);
+    setSelectedConn(null);
+    setSelectedLine(null);
+  };
+  const pasteEls = (x: number, y: number) =>
+    pasteElements(clipboardRef.current, x, y);
+
   // Content creation + import: create tools (note/todo/column + drag-place), and all drop/paste/URL/
   // image/embed/board/link flows with their dialogs. Owns the dialog/choice state and the busy flag.
   const {
@@ -649,6 +781,7 @@ export function Canvas({
     fileRef,
     fillRef,
     dropCoords,
+    pasteElements,
   });
 
   // --- Context-menu actions ---
@@ -728,60 +861,6 @@ export function Canvas({
       }
     });
     setSelectedIds(fresh);
-    setSelectedConn(null);
-    setSelectedLine(null);
-  };
-  // Copy elements (deep, with column children) into the internal clipboard.
-  const copyEls = (ids: string[]) => {
-    const c = connRef.current;
-    if (!c) return;
-    const out: Element[] = [];
-    for (const id of ids) {
-      const e = c.elements.get(id);
-      if (!e) continue;
-      out.push(structuredClone(e));
-      if (e.type === "column")
-        for (const cid of e.children) {
-          const ch = c.elements.get(cid);
-          if (ch) out.push(structuredClone(ch));
-        }
-    }
-    clipboardRef.current = out;
-  };
-  // Paste clipboard elements with fresh ids near (x,y), remapping column children.
-  const pasteEls = (x: number, y: number) => {
-    const c = connRef.current;
-    const clip = clipboardRef.current;
-    if (!c || !clip.length) return;
-    const idMap = new Map<string, string>();
-    for (const e of clip) idMap.set(e.id, crypto.randomUUID());
-    // Anchor the paste so the first element lands at (x,y).
-    const ox = x - clip[0]!.x;
-    const oy = y - clip[0]!.y;
-    const roots: string[] = [];
-    const childIds = new Set(
-      clip
-        .filter((e) => e.type === "column")
-        .flatMap((e) => (e.type === "column" ? e.children : [])),
-    );
-    let z = nextZ();
-    c.doc.transact(() => {
-      for (const e of clip) {
-        const nid = idMap.get(e.id)!;
-        const copy: Element = {
-          ...structuredClone(e),
-          id: nid,
-          x: e.x + ox,
-          y: e.y + oy,
-          z: z++,
-        } as Element;
-        if (copy.type === "column")
-          copy.children = copy.children.map((cid) => idMap.get(cid) ?? cid);
-        c.elements.set(nid, copy);
-        if (!childIds.has(e.id)) roots.push(nid);
-      }
-    });
-    setSelectedIds(roots);
     setSelectedConn(null);
     setSelectedLine(null);
   };
@@ -1080,10 +1159,12 @@ export function Canvas({
       }
       shrink={draggingId === el.id && overDelete}
       dragging={draggingId === el.id}
+      anyDragging={draggingId !== null}
       zoom={view.zoom}
       toWorld={toWorld}
       onDragMove={(x, y) => handleDragMove(el.id, x, y)}
       onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
+      onDragCancel={handleDragCancel}
     />
   );
   // Resolve + render a column's child element (embedded).

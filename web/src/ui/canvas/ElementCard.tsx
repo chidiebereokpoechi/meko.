@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Element, TodoItem } from "../../types.ts";
-import { embedHeightFor, faviconUrl } from "../../lib/embed.ts";
+import { embedAspect, embedHeightFor, faviconUrl } from "../../lib/embed.ts";
 import { sanitizeHtml } from "../../lib/sanitize.ts";
 import { Icon } from "../kit/index.ts";
 import { EditableNote, type ActiveEditor } from "../EditableNote.tsx";
@@ -275,10 +275,12 @@ export function ElementCard({
   readOnly,
   shrink,
   dragging,
+  anyDragging,
   zoom,
   toWorld,
   onDragMove,
   onDragRelease,
+  onDragCancel,
 }: {
   el: Element;
   selected: boolean;
@@ -309,13 +311,18 @@ export function ElementCard({
   readOnly?: boolean;
   shrink: boolean;
   dragging: boolean;
+  anyDragging?: boolean;
   zoom: number;
   toWorld: (cx: number, cy: number) => { x: number; y: number };
   onDragMove: (x: number, y: number) => void;
   onDragRelease: (x: number, y: number) => void;
+  onDragCancel?: () => void;
 }) {
   // Grab offset in WORLD coords so dragging works under any pan/zoom.
   const grab = useRef<{ x: number; y: number } | null>(null);
+  // Where the card sat when a free drag began + the Escape handler that reverts to it.
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const escDrag = useRef<(() => void) | null>(null);
   const size = useRef<{ x: number; y: number; w: number; h: number } | null>(
     null,
   );
@@ -326,6 +333,16 @@ export function ElementCard({
   // (first click just selects), same as a note. Images are NOT here: clicking an image only selects
   // it (so Delete removes it); its caption is edited by clicking the caption directly.
   const editsText = isText || el.type === "todo" || el.type === "column";
+  const hasEmbed =
+    el.type === "embed" || (el.type === "link" && !!el.embedSrc);
+  // Click to select, click again to "activate" (editing) — both text editing and making an embed
+  // interactive go through editingId.
+  const activatable = editsText || hasEmbed;
+  // A live (interactive) embed: only once explicitly activated (editingId), never merely selected.
+  // Reason: a live cross-origin iframe (e.g. Spotify) grabs keyboard focus, which would swallow
+  // Backspace/Delete and Escape. Keeping a selected-but-not-activated embed inert keeps it deletable.
+  // Also off during any drag, so the iframe can't swallow the pointerup and strand the drag.
+  const embedLive = editing && !readOnly && !anyDragging;
 
   // Report rendered height so connection endpoints anchor to the real card edge (auto-height cards).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -355,6 +372,10 @@ export function ElementCard({
   }, [noteText, el.h, editing]);
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // Pressing a card pulls keyboard focus back out of any activated embed iframe — otherwise focus
+    // stays trapped in the cross-origin iframe and window key handlers (Backspace/Delete) go dead.
+    if (document.activeElement instanceof HTMLIFrameElement)
+      document.activeElement.blur();
     e.stopPropagation(); // don't let the canvas deselect / pan
     // Cmd/Ctrl-click toggles multi-selection (no drag, no edit).
     if ((e.metaKey || e.ctrlKey) && onToggleSelect) {
@@ -374,7 +395,23 @@ export function ElementCard({
     if (!editing && !readOnly && !el.locked) {
       const w = toWorld(e.clientX, e.clientY);
       grab.current = { x: w.x - el.x, y: w.y - el.y };
+      dragStart.current = { x: el.x, y: el.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      // Esc mid-drag: snap the card back to where it started and abandon the drag.
+      const onEsc = (ke: KeyboardEvent) => {
+        if (ke.key !== "Escape" || !grab.current || !dragStart.current) return;
+        ke.preventDefault();
+        onMove(dragStart.current.x, dragStart.current.y);
+        grab.current = null;
+        dragged.current = false;
+        escDrag.current?.();
+        onDragCancel?.();
+      };
+      escDrag.current = () => {
+        window.removeEventListener("keydown", onEsc, true);
+        escDrag.current = null;
+      };
+      window.addEventListener("keydown", onEsc, true);
     }
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -385,6 +422,7 @@ export function ElementCard({
     onDragMove(e.clientX, e.clientY);
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    escDrag.current?.();
     if (grab.current && dragged.current) onDragRelease(e.clientX, e.clientY);
     grab.current = null;
     if (freshlyCreated) onConsumeFresh?.(); // subsequent clicks edit normally
@@ -392,13 +430,19 @@ export function ElementCard({
   // First click selects; a second click (already selected, no drag) enters edit mode.
   // (⌘/Ctrl-click toggles multi-selection — handled in onPointerDown; Alt-click opens.)
   const onClick = (e: React.MouseEvent) => {
+    // A column child must not bubble its click to the parent column card — otherwise the column
+    // would treat it as its own second click and drop into title-edit (which also blocks Backspace).
+    if (embedded) e.stopPropagation();
     if (e.metaKey || e.ctrlKey) return; // multi-select handled on pointer down
     if (e.altKey && onOpen) {
       onOpen();
       return;
     }
+    // Top-level cards enter edit on the second click. Column children do NOT — single click only
+    // selects them (so Backspace deletes); they edit/activate on double-click instead (below).
     if (
-      editsText &&
+      activatable &&
+      !embedded &&
       !readOnly &&
       !justSelected.current &&
       !editing &&
@@ -406,9 +450,16 @@ export function ElementCard({
     )
       onEdit();
   };
-  // Non-text elements (e.g. links) open on double-click.
-  const onDoubleClick = () => {
-    if (!isText && !dragged.current) onOpen?.();
+  const onDoubleClick = (e: React.MouseEvent) => {
+    if (embedded) e.stopPropagation(); // don't double-click the parent column too
+    if (dragged.current) return;
+    // A column child edits/activates on double-click (text editing, or making an embed interactive).
+    if (embedded && activatable && !readOnly) {
+      onEdit();
+      return;
+    }
+    // Non-text, non-embed cards (e.g. plain links) open on double-click.
+    if (!isText && !hasEmbed) onOpen?.();
   };
 
   const startResize = (e: React.PointerEvent) => {
@@ -574,7 +625,16 @@ export function ElementCard({
           {el.embedSrc ? (
             <div
               className="relative w-full"
-              style={{ height: embedHeightFor(el.embedSrc, el.w) }}
+              // Scale to the card/column width via aspect-ratio (so a video fills the width); Spotify
+              // and other fixed-height players keep a constant height instead.
+              style={
+                embedAspect(el.embedSrc)
+                  ? { aspectRatio: String(embedAspect(el.embedSrc)) }
+                  : { height: embedHeightFor(el.embedSrc, el.w) }
+              }
+              // Interacting with the live embed must not start a card drag: once the pointer enters
+              // the cross-origin iframe the card never sees pointerup, so the drag would get stuck.
+              onPointerDown={embedLive ? (e) => e.stopPropagation() : undefined}
             >
               <iframe
                 src={el.embedSrc}
@@ -583,12 +643,12 @@ export function ElementCard({
                 style={{
                   border: 0,
                   pointerEvents:
-                    selected && !readOnly && !freshlyCreated ? "auto" : "none",
+                    embedLive ? "auto" : "none",
                 }}
                 sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
                 allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
               />
-              {!(selected && !readOnly && !freshlyCreated) && (
+              {!(embedLive) && (
                 <div className="absolute inset-0" />
               )}
             </div>
@@ -669,7 +729,15 @@ export function ElementCard({
           </div>
         </div>
       ) : el.type === "embed" ? (
-        <div className="relative flex h-full w-full flex-col overflow-hidden">
+        <div
+          className="relative flex h-full w-full flex-col overflow-hidden"
+          // Interacting with the live embed must not start a card drag (see link embed above).
+          onPointerDown={
+            embedLive
+              ? (e) => e.stopPropagation()
+              : undefined
+          }
+        >
           {s.strip && (
             <div
               className="h-2.5 w-full shrink-0"
@@ -683,14 +751,14 @@ export function ElementCard({
             style={{
               border: 0,
               pointerEvents:
-                selected && !readOnly && !freshlyCreated ? "auto" : "none",
+                embedLive ? "auto" : "none",
             }}
             sandbox="allow-scripts allow-same-origin allow-popups allow-presentation allow-forms"
             allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
           />
           {/* Swallow pointer events unless interactive, so the card can be dragged/selected
               (including right after it's dropped). */}
-          {!(selected && !readOnly && !freshlyCreated) && (
+          {!(embedLive) && (
             <div className="absolute inset-0" />
           )}
         </div>

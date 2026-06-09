@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { BoardConnection } from "../../lib/board.ts";
 import type { Element } from "../../types.ts";
+import { startPointerDrag } from "./drag.ts";
 
 type Pt = { x: number; y: number };
 
@@ -135,43 +136,48 @@ export function useColumns(deps: {
     if (readOnly) return;
     e.stopPropagation();
     let moved = false;
-    const move = (ev: PointerEvent) => {
-      if (
-        !moved &&
-        Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) < 4
-      )
-        return;
-      moved = true;
-      setDraggingId(childId);
-      setColDrop(columnDropAt(ev.clientX, ev.clientY));
-      setChildDragGhost({ id: childId, cx: ev.clientX, cy: ev.clientY });
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+    const clear = () => {
       setDraggingId(null);
       setColDrop(null);
       setChildDragGhost(null);
-      if (!moved) {
-        selectId(childId);
-        return;
-      }
-      const targets =
-        selectedIds.includes(childId) && selectedIds.length > 1
-          ? selectedIds.filter((tid) => childToCol.has(tid))
-          : [childId];
-      const drop = columnDropAt(ev.clientX, ev.clientY);
-      if (drop)
-        targets.forEach((t, i) =>
-          moveChildToColumn(t, drop.colId, drop.index + i),
-        );
-      else {
-        const w = toWorld(ev.clientX, ev.clientY);
-        targets.forEach((t, i) => extractChild(t, w.x, w.y + i * 24));
-      }
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) => {
+        // Only treat it as a drag past a deliberate threshold — a precise click (e.g. an embed's
+        // play button) jitters a few px and must still count as a click, not a drag.
+        if (
+          !moved &&
+          Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) <
+            8
+        )
+          return;
+        moved = true;
+        setDraggingId(childId);
+        setColDrop(columnDropAt(ev.clientX, ev.clientY));
+        setChildDragGhost({ id: childId, cx: ev.clientX, cy: ev.clientY });
+      },
+      onUp: (ev) => {
+        clear();
+        if (!moved) {
+          selectId(childId);
+          return;
+        }
+        const targets =
+          selectedIds.includes(childId) && selectedIds.length > 1
+            ? selectedIds.filter((tid) => childToCol.has(tid))
+            : [childId];
+        const drop = columnDropAt(ev.clientX, ev.clientY);
+        if (drop)
+          targets.forEach((t, i) =>
+            moveChildToColumn(t, drop.colId, drop.index + i),
+          );
+        else {
+          const w = toWorld(ev.clientX, ev.clientY);
+          targets.forEach((t, i) => extractChild(t, w.x, w.y + i * 24));
+        }
+      },
+      onCancel: clear, // Esc: leave the child where it was
+    });
   };
 
   // Wrap the selected (non-column) elements into a new column at their top-left.

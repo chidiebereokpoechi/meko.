@@ -77,8 +77,12 @@ export function embedDefaultSize(src: string): { w: number; h: number } {
     const u = new URL(src);
     const host = u.hostname.replace(/^www\./, "");
     if (host === "open.spotify.com") {
-      // Spotify: compact player for a single track/episode, tall player for collections.
-      return /\/embed\/(track|episode)\//.test(u.pathname) ? { w, h: 152 } : { w, h: 352 };
+      // Spotify renders the COMPACT horizontal player only when the iframe is SHORT (~80px). A
+      // single track/episode → 80px; collections (album/playlist) → the tall player. These are FIXED
+      // heights (full width, never scaled tall) — see embedAspect returning null for Spotify.
+      return /\/embed\/(track|episode)\//.test(u.pathname)
+        ? { w, h: 80 }
+        : { w, h: 352 };
     }
     if (host.endsWith("figma.com")) return { w: 420, h: 300 };
     // YouTube / Vimeo / Loom and most video: 16:9.
@@ -86,6 +90,20 @@ export function embedDefaultSize(src: string): { w: number; h: number } {
   } catch {
     return { w, h: 203 };
   }
+}
+
+// Width/height ratio for an embed that should SCALE with its container (video fills the width and
+// keeps a 16:9-ish ratio). null for fixed-height players: Spotify must stay short (the compact
+// player) at any width, so scaling it tall would summon the big player and overflow a narrow card.
+export function embedAspect(src: string): number | null {
+  try {
+    if (new URL(src).hostname.replace(/^www\./, "") === "open.spotify.com")
+      return null;
+  } catch {
+    /* fall through */
+  }
+  const d = embedDefaultSize(src);
+  return d.w / d.h;
 }
 
 export function embedHost(src: string): string {
@@ -96,9 +114,11 @@ export function embedHost(src: string): string {
   }
 }
 
-// Preview height for an embed shown inside a link card at the given width (keeps native ratio).
+// Preview height for an embed shown inside a link card at the given width. Scalable embeds keep
+// their native ratio; Spotify is fixed-height (compact player) at any width — see embedAspect.
 export function embedHeightFor(src: string, w: number): number {
   const d = embedDefaultSize(src);
+  if (embedAspect(src) === null) return d.h; // fixed-height (Spotify)
   return Math.round((d.h * w) / d.w);
 }
 

@@ -12,9 +12,13 @@ import {
   nearestAnchor,
   resolveEnd,
 } from "./geometry.ts";
+import { startPointerDrag } from "./drag.ts";
 
 type Pt = { x: number; y: number };
 type Sized = Element & { h: number };
+
+// Length (world units) of the line dropped when the tool is clicked without dragging.
+const DEFAULT_LINE_LEN = 120;
 
 // Edges = arrows (connections) between elements + standalone lines. This hook owns all edge state
 // (in-progress link drag, endpoint/bend drags, the line tool, selection + inline label editing) and
@@ -146,22 +150,24 @@ export function useEdges(deps: {
     e.stopPropagation();
     setLinking({ from });
     setLinkEnd(toWorld(e.clientX, e.clientY));
-    const move = (ev: PointerEvent) => {
-      const w = toWorld(ev.clientX, ev.clientY);
-      setLinkEnd(w);
-      setLinkTarget(linkTargetAt(w, from));
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      const target = linkTargetAt(toWorld(ev.clientX, ev.clientY), from);
-      if (target) addConnection(from, target);
+    const reset = () => {
       setLinking(null);
       setLinkEnd(null);
       setLinkTarget(null);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) => {
+        const w = toWorld(ev.clientX, ev.clientY);
+        setLinkEnd(w);
+        setLinkTarget(linkTargetAt(w, from));
+      },
+      onUp: (ev) => {
+        const target = linkTargetAt(toWorld(ev.clientX, ev.clientY), from);
+        if (target) addConnection(from, target);
+        reset();
+      },
+      onCancel: reset, // Esc: abandon the arrow
+    });
   };
 
   // Drag a selected connection's endpoint to re-anchor it: the endpoint follows the cursor, and on
@@ -174,37 +180,37 @@ export function useEdges(deps: {
     if (readOnly) return;
     e.stopPropagation();
     setConnDrag({ id, which, pos: toWorld(e.clientX, e.clientY) });
-    const move = (ev: PointerEvent) =>
-      setConnDrag({ id, which, pos: toWorld(ev.clientX, ev.clientY) });
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      const w = toWorld(ev.clientX, ev.clientY);
-      const cn = connRef.current?.connections.get(id);
-      const target = [...sizedElements]
-        .reverse()
-        .find(
-          (el) =>
-            !childToCol.has(el.id) &&
-            w.x >= el.x &&
-            w.x <= el.x + el.w &&
-            w.y >= el.y &&
-            w.y <= el.y + el.h,
-        );
-      if (cn && target) {
-        const other = which === "from" ? cn.to : cn.from;
-        if (target.id !== other) patchConnection(id, { [which]: target.id });
-      }
-      setConnDrag(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) =>
+        setConnDrag({ id, which, pos: toWorld(ev.clientX, ev.clientY) }),
+      onUp: (ev) => {
+        const w = toWorld(ev.clientX, ev.clientY);
+        const cn = connRef.current?.connections.get(id);
+        const target = [...sizedElements]
+          .reverse()
+          .find(
+            (el) =>
+              !childToCol.has(el.id) &&
+              w.x >= el.x &&
+              w.x <= el.x + el.w &&
+              w.y >= el.y &&
+              w.y <= el.y + el.h,
+          );
+        if (cn && target) {
+          const other = which === "from" ? cn.to : cn.from;
+          if (target.id !== other) patchConnection(id, { [which]: target.id });
+        }
+        setConnDrag(null);
+      },
+      onCancel: () => setConnDrag(null), // Esc: leave the endpoint where it was
+    });
   };
 
   // Drag the midpoint handle to curve the line; releasing near the straight midpoint snaps it back.
   const startBendDrag = (id: string, e: React.PointerEvent) => {
     if (readOnly) return;
     e.stopPropagation();
+    const orig = connRef.current?.connections.get(id)?.bend;
     const apply = (clientX: number, clientY: number) => {
       const c = connRef.current;
       const cn = c?.connections.get(id);
@@ -222,13 +228,10 @@ export function useEdges(deps: {
         bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend,
       });
     };
-    const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) => apply(ev.clientX, ev.clientY),
+      onCancel: () => patchConnection(id, { bend: orig }), // Esc: restore the original curve
+    });
   };
 
   // Snap a pointer position to the nearest element anchor (corner / edge-mid / centre), else free.
@@ -252,21 +255,21 @@ export function useEdges(deps: {
     if (readOnly) return;
     e.stopPropagation();
     setLineDrag({ id, which, ep: snapEndpoint(e.clientX, e.clientY) });
-    const move = (ev: PointerEvent) =>
-      setLineDrag({ id, which, ep: snapEndpoint(ev.clientX, ev.clientY) });
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      patchLine(id, { [which]: snapEndpoint(ev.clientX, ev.clientY) });
-      setLineDrag(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) =>
+        setLineDrag({ id, which, ep: snapEndpoint(ev.clientX, ev.clientY) }),
+      onUp: (ev) => {
+        patchLine(id, { [which]: snapEndpoint(ev.clientX, ev.clientY) });
+        setLineDrag(null);
+      },
+      onCancel: () => setLineDrag(null), // Esc: keep the endpoint (only a preview moved)
+    });
   };
   // Bend a line by dragging its midpoint handle (quadratic control); snaps back near straight.
   const startLineBendDrag = (id: string, e: React.PointerEvent) => {
     if (readOnly) return;
     e.stopPropagation();
+    const orig = connRef.current?.lines.get(id)?.bend;
     const byId = new Map(sizedElements.map((el) => [el.id, el]));
     const apply = (clientX: number, clientY: number) => {
       const ln = connRef.current?.lines.get(id);
@@ -280,13 +283,10 @@ export function useEdges(deps: {
         bend: Math.hypot(bend.x, bend.y) < 8 ? undefined : bend,
       });
     };
-    const move = (ev: PointerEvent) => apply(ev.clientX, ev.clientY);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag({
+      onMove: (ev) => apply(ev.clientX, ev.clientY),
+      onCancel: () => patchLine(id, { bend: orig }), // Esc: restore the original curve
+    });
   };
 
   // Line-tool draw, driven by the viewport pointer handlers in Canvas (which also do pan/marquee).
@@ -296,28 +296,29 @@ export function useEdges(deps: {
   };
   const updateLineDraw = (clientX: number, clientY: number) =>
     setLineDraw((d) => (d ? { a: d.a, b: snapEndpoint(clientX, clientY) } : d));
-  // Commit the drawn line if it has length; otherwise discard a stray click. Disarms the tool.
+  // Esc while drawing: discard the in-progress line and disarm the tool.
+  const cancelLineDraw = () => {
+    setLineDraw(null);
+    setArmLine(false);
+  };
+  // Commit the line. A real drag uses the drawn endpoints; a click (no drag) drops a default
+  // horizontal line of DEFAULT_LINE_LEN starting at the click. Disarms the tool either way.
   const commitLineDraw = () => {
     if (!lineDraw) return;
     const len = Math.hypot(
       lineDraw.b.x - lineDraw.a.x,
       lineDraw.b.y - lineDraw.a.y,
     );
-    if (len > 8) {
-      const c = connRef.current;
-      if (c) {
-        const id = crypto.randomUUID();
-        c.lines.set(id, {
-          id,
-          a: lineDraw.a,
-          b: lineDraw.b,
-          arrowStart: false,
-          arrowEnd: false,
-        });
-        setSelectedLine(id);
-        setSelectedIds([]);
-        setSelectedConn(null);
-      }
+    const a = lineDraw.a;
+    const b =
+      len > 8 ? lineDraw.b : { x: a.x + DEFAULT_LINE_LEN, y: a.y };
+    const c = connRef.current;
+    if (c) {
+      const id = crypto.randomUUID();
+      c.lines.set(id, { id, a, b, arrowStart: false, arrowEnd: false });
+      setSelectedLine(id);
+      setSelectedIds([]);
+      setSelectedConn(null);
     }
     setLineDraw(null);
     setArmLine(false);
@@ -365,5 +366,6 @@ export function useEdges(deps: {
     beginLineDraw,
     updateLineDraw,
     commitLineDraw,
+    cancelLineDraw,
   };
 }
