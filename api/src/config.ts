@@ -36,7 +36,12 @@ const Env = z.object({
   OIDC_ISSUER: z.string().default(""), // discovery: {issuer}/.well-known/openid-configuration
   OIDC_CLIENT_ID: z.string().default(""),
   OIDC_CLIENT_SECRET: z.string().default(""),
-  OIDC_REDIRECT_URI: z.string().default(""), // {MEKO_BASE_URL}/api/auth/oidc/callback
+  OIDC_REDIRECT_URI: z.string().default(""), // {MEKO_BASE_URL}/api/auth/oidc/callback — shared by all providers
+  // Optional second provider: sign in directly with Google. Enabled when both creds are set.
+  // Google's issuer is fixed (accounts.google.com); register OIDC_REDIRECT_URI in the Google
+  // Cloud console as an authorised redirect URI for this OAuth client.
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
   // Where the OIDC callback sends the browser after a successful login (the SPA origin).
   MEKO_WEB_URL: z.string().url().default("http://localhost:5173"),
 
@@ -91,11 +96,44 @@ export type Config = typeof config;
 
 export const isProd = config.NODE_ENV === "production";
 
-// OIDC is wired only when the issuer + confidential-client creds are all present. The login/callback
-// routes 404 otherwise, so a half-configured node never exposes a broken auth path.
-export const oidcEnabled = !!(config.OIDC_ISSUER && config.OIDC_CLIENT_ID && config.OIDC_CLIENT_SECRET);
+// OIDC providers, each wired only when its creds are all present. Every provider shares the single
+// callback (OIDC_REDIRECT_URI); the chosen provider is carried in the login tx, not the URL, so one
+// registered redirect URI serves them all. The login/callback routes 404 when no provider is wired,
+// so a half-configured node never exposes a broken auth path.
+export interface OidcProvider {
+  id: string;
+  label: string;
+  issuer: string; // used to build the discovery URL; iss is checked against the discovered value
+  clientId: string;
+  clientSecret: string;
+}
+
+const GOOGLE_ISSUER = "https://accounts.google.com";
+
+export const oidcProviders: OidcProvider[] = [];
+if (config.OIDC_ISSUER && config.OIDC_CLIENT_ID && config.OIDC_CLIENT_SECRET) {
+  oidcProviders.push({
+    id: "authentik",
+    label: "Authentik",
+    issuer: config.OIDC_ISSUER.replace(/\/$/, ""),
+    clientId: config.OIDC_CLIENT_ID,
+    clientSecret: config.OIDC_CLIENT_SECRET,
+  });
+}
+if (config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET) {
+  oidcProviders.push({
+    id: "google",
+    label: "Google",
+    issuer: GOOGLE_ISSUER,
+    clientId: config.GOOGLE_CLIENT_ID,
+    clientSecret: config.GOOGLE_CLIENT_SECRET,
+  });
+}
+
+export const oidcProviderById = (id: string): OidcProvider | undefined => oidcProviders.find((p) => p.id === id);
+export const oidcEnabled = oidcProviders.length > 0;
 if (oidcEnabled && !config.OIDC_REDIRECT_URI) {
-  console.error("OIDC_ISSUER set but OIDC_REDIRECT_URI is empty — set it to {MEKO_BASE_URL}/api/auth/oidc/callback");
+  console.error("An OIDC provider is configured but OIDC_REDIRECT_URI is empty — set it to {MEKO_BASE_URL}/api/auth/oidc/callback");
   process.exit(1);
 }
 

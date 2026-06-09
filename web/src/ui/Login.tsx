@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { API, login } from "../lib/auth.ts";
 import { Button, TextField } from "./kit/index.ts";
 
 // Map the callback's ?auth_error code (set on a failed OIDC round trip) to a human message.
 const OIDC_ERRORS: Record<string, string> = {
-  email_unverified: "Your Google email isn't verified, so it can't be linked to an existing account.",
-  access_denied: "Google sign-in was cancelled.",
+  email_unverified: "Your email isn't verified by your identity provider, so it can't be linked to an existing account.",
+  access_denied: "Sign-in was cancelled.",
   signup_closed: "meko. is invite-only — ask an admin to invite your email.",
 };
 function readOidcError(): string | null {
@@ -33,10 +33,19 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(() => readOidcError());
   const [busy, setBusy] = useState(false);
-  // Carry the current path (e.g. /invite/<token>) through the Google round trip so an invited user
+  // OIDC providers configured on the server (e.g. Authentik, Google) — only these get a button.
+  const [providers, setProviders] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    fetch(`${API}/api/auth/oidc/providers`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { providers: [] }))
+      .then((d) => setProviders(d.providers ?? []))
+      .catch(() => setProviders([]));
+  }, []);
+  // Carry the current path (e.g. /invite/<token>) through the IdP round trip so an invited user
   // lands back on the invite after authenticating. There is no self-signup — accounts are created
   // only when an invited (or bootstrap-allowlisted) email authenticates.
-  const oidcUrl = `${API}/api/auth/oidc/login?return=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+  const ret = encodeURIComponent(window.location.pathname + window.location.search);
+  const oidcUrl = (providerId: string) => `${API}/api/auth/oidc/login?provider=${providerId}&return=${ret}`;
 
   // <form onSubmit> → Enter submits. Login only; no signup from this screen.
   const submit = async (e: React.FormEvent) => {
@@ -57,18 +66,23 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
     <div className="grid h-screen place-items-center bg-slate-100">
       <form className="flex w-80 flex-col gap-4 rounded-xl border-2 border-line-subtle bg-white px-8 py-9" onSubmit={submit}>
         <div>
-          <h1 className="heading text-2xl text-primary">meko.</h1>
-          <p className="mt-1 text-slate-400">Sign in to your boards</p>
+          <img src="/meko.png" alt="meko." className="h-12 w-12 rounded-xl" />
+          <p className="mt-3 text-slate-400">Sign in to your boards</p>
         </div>
-        <a
-          href={oidcUrl}
-          className="flex items-center justify-center gap-2 rounded-lg border-2 border-line bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
-        >
-          <GoogleG /> Continue with Google
-        </a>
-        <div className="flex items-center gap-3 text-[11px] font-bold uppercase text-slate-300">
-          <span className="h-0.5 flex-1 bg-slate-100" /> or <span className="h-0.5 flex-1 bg-slate-100" />
-        </div>
+        {providers.map((p) => (
+          <a
+            key={p.id}
+            href={oidcUrl(p.id)}
+            className="flex items-center justify-center gap-2 rounded-lg border-2 border-line bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+          >
+            {p.id === "google" && <GoogleG />} Continue with {p.label}
+          </a>
+        ))}
+        {providers.length > 0 && (
+          <div className="flex items-center gap-3 text-[11px] font-bold uppercase text-slate-300">
+            <span className="h-0.5 flex-1 bg-slate-100" /> or <span className="h-0.5 flex-1 bg-slate-100" />
+          </div>
+        )}
         <TextField name="email" type="email" label="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <TextField
           name="password"

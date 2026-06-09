@@ -15,7 +15,7 @@ import { issueWsTicket } from "@/auth/ws-ticket.ts";
 import { bearerUser } from "@/auth/middleware.ts";
 import { clientIp, enforceRateLimit } from "@/lib/rate-limit.ts";
 import { securityEvent } from "@/lib/logger.ts";
-import { config, oidcEnabled } from "@/config.ts";
+import { config, oidcEnabled, oidcProviders, oidcProviderById } from "@/config.ts";
 import { redis } from "@/lib/redis.ts";
 import { buildAuthorizeUrl, completeLogin, pkcePair, randomToken } from "@/auth/oidc.ts";
 import { provisionOidcUser, OidcLinkError } from "@/auth/provision.ts";
@@ -128,6 +128,9 @@ export const auth = new Elysia({ prefix: "/api/auth" })
   // Lax cookie (Lax so it survives the top-level redirect back from the IdP), 302 to the IdP.
   .get("/oidc/login", async ({ query, set }) => {
     if (!oidcEnabled) return oidcDisabled(set);
+    // Pick the requested provider; default to the first configured one (back-compat with the old
+    // single-button URL). An unknown id falls through to the default rather than erroring.
+    const provider = oidcProviderById(String(query.provider ?? "")) ?? oidcProviders[0]!;
     const tx = randomToken();
     const state = randomToken();
     const nonce = randomToken();
@@ -135,10 +138,12 @@ export const auth = new Elysia({ prefix: "/api/auth" })
     // Where to land after login (e.g. /invite/<token>). Sanitised to a same-site relative path to
     // prevent the callback being turned into an open redirect.
     const ret = safeReturnPath(query.return);
-    await redis.set(txKey(tx), JSON.stringify({ state, nonce, verifier, ret }), "EX", OIDC_TX_TTL);
+    await redis.set(txKey(tx), JSON.stringify({ provider: provider.id, state, nonce, verifier, ret }), "EX", OIDC_TX_TTL);
     set.headers["set-cookie"] = txCookie(tx);
-    redirect(set, await buildAuthorizeUrl({ state, nonce, codeChallenge: challenge }));
+    redirect(set, await buildAuthorizeUrl(provider, { state, nonce, codeChallenge: challenge }));
   })
+  // Which OIDC providers are wired, so the login screen renders only the configured buttons.
+  .get("/oidc/providers", () => ({ providers: oidcProviders.map((p) => ({ id: p.id, label: p.label })) }))
   // Step 2: validate state, exchange the code, verify the id_token, JIT-provision the meko user,
   // then issue meko's OWN session (rotating refresh cookie, §9h) and 302 to the web app. The SPA's
   // boot refresh() mints the access token — the IdP is not contacted again.
@@ -161,12 +166,16 @@ export const auth = new Elysia({ prefix: "/api/auth" })
 
     const raw = await redis.getdel(txKey(tx));
     if (!raw) return fail("expired_tx");
-    const { state, nonce, verifier, ret: txRet } = JSON.parse(raw) as { state: string; nonce: string; verifier: string; ret?: string };
+    const { provider: providerId, state, nonce, verifier, ret: txRet } = JSON.parse(raw) as { provider?: string; state: string; nonce: string; verifier: string; ret?: string };
     ret = safeReturnPath(txRet);
     if (state !== query.state) return fail("state_mismatch");
+    // Recover the provider chosen at /login (carried in the tx, not the URL). Default keeps txs
+    // written before this field existed working.
+    const provider = oidcProviderById(providerId ?? "") ?? oidcProviders[0];
+    if (!provider) return fail("unknown_provider");
 
     try {
-      const claims = await completeLogin(String(query.code), verifier, nonce);
+      const claims = await completeLogin(provider, String(query.code), verifier, nonce);
       const userId = await provisionOidcUser(claims);
       const refreshRaw = await issueRefreshFamily(userId, request.headers.get("user-agent") ?? undefined, clientIp(request));
       // Two Set-Cookie headers: clear the tx cookie + install the session refresh cookie.

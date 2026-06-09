@@ -53,11 +53,8 @@ export function TopBar({
   return (
     <div>
       <header className="flex h-14 items-center gap-3 border-b-2 border-line bg-surface px-4">
-        <button
-          onClick={onHome}
-          className="grid h-7 w-7 place-items-center rounded-lg bg-primary font-bold text-white"
-        >
-          m
+        <button onClick={onHome} className="block h-7 w-7 overflow-hidden rounded-lg" aria-label="Home">
+          <img src="/meko.png" alt="meko." className="h-full w-full object-cover" />
         </button>
 
         <Menu as="div" className="relative">

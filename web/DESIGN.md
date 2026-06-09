@@ -15,7 +15,10 @@ check spenny first** and reuse its library/approach — don't reinvent. Establis
 
 ## Visual tokens (lifted from spenny.io-web)
 
-- **Primary** `#6e24ff`, **primary-dark** `#3600a3`. Text `slate-700`; muted `slate-400/500`.
+- **Primary** `#6e24ff`, **primary-dark** `#3600a3`. **Accent** `#aeef34` (lime, from the logo
+  wordmark — `bg-accent`/`text-accent`; pairs on the primary purple, not legible as text on white).
+  Text `slate-700`; muted `slate-400/500`.
+- **Logo mark**: `web/public/meko.png`, served at `/meko.png` (favicon, top-bar mark, login).
 - Base font **Manrope**, body `text-xs` (16px root), `tabular-nums`.
 - Radii: controls `rounded-lg`, cards/tiles `rounded-xl`/`rounded-2xl`, modals `rounded-xl`.
 - Shadows: `shadow-lg` on cards/modals/floating UI.
