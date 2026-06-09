@@ -82,6 +82,7 @@ export function deserializeElements(html: string): Element[] | null {
 export type MilanoteItem =
   | { kind: "image"; src: string; caption?: string }
   | { kind: "link"; url: string; title?: string; embedSrc?: string }
+  | { kind: "todo"; title?: string; items: { text: string; done: boolean }[] }
   | { kind: "note"; html: string };
 
 // Parse a copied Milanote selection from its rich text/html. Milanote markup is a sequence of
@@ -104,6 +105,21 @@ export function parseMilanoteHtml(
   const title = doc.querySelector("h2")?.textContent?.trim() || null;
   const items: MilanoteItem[] = [];
   for (const card of cards) {
+    // Only top-level cards — skip elements nested inside another (e.g. the tasks inside a TaskList,
+    // which are handled by their TaskList parent below).
+    if (card.parentElement?.closest(".Element")) continue;
+    // A TaskList → a single meko to-do with its tasks as items. (The "TaskList" class sits on a
+    // child of .Element, not the .Element itself.)
+    if (card.querySelector(".TaskList")) {
+      const tasks = Array.from(card.querySelectorAll(".Task"))
+        .map((t) => ({
+          text: t.querySelector(".ProseMirror")?.textContent?.trim() ?? "",
+          done: /\b(checked|complete|completed|done)\b/i.test(t.className),
+        }))
+        .filter((it) => it.text);
+      if (tasks.length) items.push({ kind: "todo", items: tasks });
+      continue;
+    }
     const img = card.querySelector("img.image-node");
     const src = img?.getAttribute("src");
     if (src) {

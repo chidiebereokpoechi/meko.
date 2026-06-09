@@ -449,6 +449,22 @@ export function useImport(deps: {
           src: it.src,
           ...(caption ? { caption, showCaption: true } : {}),
         } as Element);
+      } else if (it.kind === "todo") {
+        built.push({
+          id,
+          type: "todo",
+          x: at.x,
+          y: at.y,
+          w: 240,
+          h: 140,
+          title: it.title ?? "",
+          items: it.items.map((t) => ({
+            id: crypto.randomUUID(),
+            text: t.text,
+            done: t.done,
+          })),
+          style: { fill: "#ffffff" },
+        } as Element);
       } else if (it.kind === "link") {
         const w = it.embedSrc ? 360 : 260;
         const previewH = it.embedSrc ? embedHeightFor(it.embedSrc, w) : 0;
