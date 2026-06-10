@@ -9,6 +9,8 @@ import { Canvas, type BoardControls } from "./ui/Canvas.tsx";
 import { TopBar } from "./ui/layout/TopBar.tsx";
 import { NameModal } from "./ui/NameModal.tsx";
 import { ShareModal } from "./ui/ShareModal.tsx";
+import { SearchModal } from "./ui/SearchModal.tsx";
+import { HelpModal } from "./ui/HelpModal.tsx";
 import { AcceptToken } from "./ui/AcceptToken.tsx";
 import { Toaster, toast } from "./ui/kit/index.ts";
 
@@ -107,7 +109,23 @@ function Shell({
   const { workspaceId, boardId } = useParams();
   const navigate = useNavigate();
   const [share, setShare] = useState(false);
+  const [search, setSearch] = useState(false);
+  const [help, setHelp] = useState(false);
   const role = workspaces.find((w) => w.id === workspaceId)?.role ?? null;
+
+  // ⌘/Ctrl+K opens board search from anywhere (skipped while typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || (!e.metaKey && !e.ctrlKey)) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      e.preventDefault();
+      setSearch(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="flex h-screen flex-col bg-white">
       <TopBar
@@ -120,6 +138,8 @@ function Shell({
         onHome={() => navigate("/")}
         user={user}
         onLogout={onLogout}
+        onSearch={() => setSearch(true)}
+        onHelp={() => setHelp(true)}
         undo={controls?.undo}
         redo={controls?.redo}
         canUndo={!!controls?.canUndo}
@@ -141,6 +161,13 @@ function Shell({
         }
       />
       <Outlet />
+      <SearchModal
+        open={search}
+        onClose={() => setSearch(false)}
+        workspaces={workspaces}
+        onOpenBoard={(b) => navigate(`/w/${b.workspaceId}/b/${b.id}`)}
+      />
+      <HelpModal open={help} onClose={() => setHelp(false)} />
       {boardId && workspaceId && (
         <ShareModal
           open={share}

@@ -38,6 +38,17 @@ export async function importImage(
   return mediaId;
 }
 
+// Presigned URL for the raw uploaded original (edit-gated server-side — a read-only guest can't
+// fetch a scriptable SVG). Returns null on missing/denied.
+export async function resolveOriginal(mediaId: string): Promise<string | null> {
+  try {
+    const m = await api<{ originalUrl: string }>(`/api/media/${mediaId}/original`);
+    return m.originalUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Re-resolve a fresh presigned display URL for a stored mediaId (the URL baked into an element
 // expires). Returns null if not ready / not found.
 export async function resolveMedia(mediaId: string): Promise<string | null> {

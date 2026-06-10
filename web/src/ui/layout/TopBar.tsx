@@ -24,6 +24,8 @@ export function TopBar({
   onHome,
   user,
   onLogout,
+  onSearch,
+  onHelp,
   undo,
   redo,
   canUndo,
@@ -41,6 +43,8 @@ export function TopBar({
   onHome: () => void;
   user?: CurrentUser | null;
   onLogout: () => void;
+  onSearch: () => void;
+  onHelp: () => void;
   undo?: () => void;
   redo?: () => void;
   canUndo?: boolean;
@@ -121,17 +125,11 @@ export function TopBar({
         )}
 
         <div className="flex items-center gap-1 text-ink-muted">
-          <IconBtn label="Search">
+          <IconBtn label="Search (⌘K)" onClick={onSearch}>
             <Icon.SearchIcon className="text-lg" />
           </IconBtn>
-          <IconBtn label="Help">
+          <IconBtn label="Help" onClick={onHelp}>
             <Icon.HelpIcon className="text-lg" />
-          </IconBtn>
-          <IconBtn label="Notifications">
-            <Icon.BellIcon className="text-lg" />
-          </IconBtn>
-          <IconBtn label="Settings">
-            <Icon.SettingsIcon className="text-lg" />
           </IconBtn>
         </div>
         <Menu as="div" className="relative">

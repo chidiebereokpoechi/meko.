@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes } from "react";
 
-type Variant = "primary" | "ghost";
+type Variant = "primary" | "ghost" | "danger";
 
 // Lifted from spenny's PrimaryButton: rounded-lg, primary fill, spinner while loading.
 export function Button({
@@ -15,7 +15,9 @@ export function Button({
   const styles =
     variant === "primary"
       ? "bg-primary text-white hover:bg-primary-dark focus:bg-primary-dark disabled:bg-[#e7e7eb]"
-      : "text-slate-500 hover:text-primary-dark disabled:text-slate-300";
+      : variant === "danger"
+        ? "bg-red-500 text-white hover:bg-red-600 focus:bg-red-600 disabled:bg-[#e7e7eb]"
+        : "text-slate-500 hover:text-primary-dark disabled:text-slate-300";
   return (
     <button className={`${base} ${styles} ${className}`} disabled={disabled || loading} {...props}>
       {loading ? <Spinner /> : children}

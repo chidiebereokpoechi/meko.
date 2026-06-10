@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Element } from "../types.ts";
-import { Icon } from "./kit/index.ts";
+import { resolveOriginal } from "../lib/media.ts";
+import { Icon, toast } from "./kit/index.ts";
 import { Popover, RailBtn, RailShell, StripPicker } from "./NoteSubRail.tsx";
 
 type Img = Extract<Element, { type: "image" }>;
@@ -67,6 +68,23 @@ export function ImageSubRail({
       </div>
 
       <RailBtn label="Caption" active={!!el.showCaption} icon={<Icon.AlignIcon />} onClick={() => onPatch({ showCaption: !el.showCaption })} />
+
+      {el.mediaId && (
+        <RailBtn
+          label="Original"
+          icon={<Icon.ExportIcon />}
+          onClick={async () => {
+            // Open the tab synchronously (popup blockers), then point it at the presigned URL.
+            const w = window.open("", "_blank");
+            const url = await resolveOriginal(el.mediaId!);
+            if (url && w) w.location.href = url;
+            else {
+              w?.close();
+              toast("Original unavailable", "error");
+            }
+          }}
+        />
+      )}
     </RailShell>
   );
 }
