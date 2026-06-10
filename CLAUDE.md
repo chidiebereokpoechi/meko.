@@ -193,3 +193,38 @@ All v4 phases (1–8) are implemented. The full suite is `bun test` (live S3 + C
 opt-in/skipped); `bun run bench` is the perf gate.
 When you implement a phase item, check it against the invariant it maps to above. Authenticated
 API tests can still forge an access token via `mintAccessToken`, or go through `/api/auth/signup`.
+
+## Frontend status (`web/`)
+
+**Every public API endpoint has UI.** Last verified 2026-06-10 (full endpoint↔UI audit). Don't
+re-derive this — update this section when it changes.
+
+- **Implemented:** auth (password + OIDC), workspace switcher/create, boards home with tile
+  context menu (open/rename/delete — right-click or hover dots), board search (top-bar + ⌘K,
+  `SearchModal`), shortcuts help (`HelpModal`), canvas with all element types (note/text, image,
+  link, todo, board, embed, column) + arrows/lines, columns (nest/reorder/extract), selection
+  rails per element type, comments panel (+ unread dot), share links + workspace invites + members
+  modal (`/share/:token`, `/invite/:token` redemption), exports (PNG via sidecar, polled),
+  image upload/import + "Original" download (edit-gated raw), undo/redo, copy/cut/paste
+  (internal + OS clipboard), duplicate, lock, z-order, Milanote import, presence cursors.
+- **Intentionally absent (no backend):** top-bar Notifications and Settings buttons were removed —
+  re-add only when an API exists to back them. Board duplicate has no endpoint. No minimap,
+  trash/archive, or mobile layout — never planned/started.
+
+### Canvas perf architecture (don't regress)
+
+The canvas is plain DOM, fast because React is kept OFF the per-frame hot path:
+
+1. **Pan/zoom never goes through React state mid-gesture.** Live view lives in `useViewport`'s
+   `viewRef`; gesture events write `surface.style.transform` directly. Committed `view` state
+   updates on gesture end (trailing 120ms / pointerup). The surface transform is NEVER in JSX.
+   Anything needing the current view mid-gesture reads `viewRef`/`toWorld` (stable), not `view`.
+2. **Card drags mutate the card's own DOM node per pointer event**; Yjs gets the position at
+   ~30fps (`MOVE_FLUSH_MS`), final position flushed before release. `dragPos` ref feeds the JSX
+   transform mid-drag so re-renders can't snap the card back.
+3. **`ElementCard` is `React.memo`** with id-taking callbacks: ONE stable callback set
+   (`stable`/`latestRef` pattern in `Canvas.tsx`) shared by all cards — never pass per-element
+   closures, they defeat the memo. Columns always re-render (children render inline through them).
+4. **Cards position via `transform: translate3d`** (compositor-only), never `left/top`. Plus
+   `content-visibility: auto` + `contain: layout style` on top-level cards.
+5. Yjs observer → `setTick` is rAF-coalesced; `colDrop` keeps identity when unchanged.

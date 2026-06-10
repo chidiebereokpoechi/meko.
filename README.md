@@ -7,7 +7,10 @@ Design: [meko-plan-v4.md](meko-plan-v4.md). Working agreement + invariants: [CLA
 
 ## Status
 
-**All v4 phases (1–8) implemented.**
+**All v4 phases (1–8) implemented.** Frontend covers every public API endpoint (boards CRUD,
+search/⌘K, sharing/invites, comments, exports, media incl. original download) — see the
+"Frontend status" section in [CLAUDE.md](CLAUDE.md) for the feature inventory and the canvas
+performance architecture.
 
 1. Collab spike — multi-node Yjs over Redis pub/sub, WS ticket auth, doc size gate, Postgres
    persistence + compaction, `SKIP LOCKED` worker, security headers/CSP/CORS, health, logging.
