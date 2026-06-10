@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardConnection, type ConnStatus, type Peer } from "../lib/board.ts";
 import { resolveMedia } from "../lib/media.ts";
-import type { Connection, Element, LineShape } from "../types.ts";
+import type { Connection, Element, LineShape, TodoItem } from "../types.ts";
 import { ContextMenu, Icon, type MenuItem } from "./kit/index.ts";
 import { type Tool } from "./layout/ToolRail.tsx";
 import { SelectionRail } from "./canvas/SelectionRail.tsx";
@@ -23,6 +23,28 @@ import { useViewport } from "./canvas/useViewport.ts";
 import { useEdges } from "./canvas/useEdges.ts";
 import { useColumns } from "./canvas/useColumns.ts";
 import { useImport } from "./canvas/useImport.ts";
+
+// Latest-render implementations of every per-card action. Re-captured on each render; the
+// `stable` wrappers (useMemo below) delegate through this ref so memoised ElementCards keep ONE
+// callback identity for the whole session — fresh closures per render would defeat React.memo.
+type CardActions = {
+  selectId: (id: string) => void;
+  toggleSelect: (id: string) => void;
+  openMenu: (id: string, e: React.MouseEvent) => void;
+  edit: (id: string) => void;
+  moveElement: (id: string, x: number, y: number) => void;
+  patch: (id: string, p: Partial<Element>) => void;
+  openElement: (id: string) => void;
+  captionFocus: (id: string) => void;
+  consumeFresh: () => void;
+  toggleCollapse: (id: string) => void;
+  startLink: (id: string, e: React.PointerEvent) => void;
+  startColumnChildDrag: (id: string, e: React.PointerEvent) => void;
+  renderColumnChild: (cid: string) => React.ReactNode;
+  handleDragMove: (id: string, x: number, y: number) => void;
+  handleDragRelease: (id: string, x: number, y: number) => void;
+  handleDragCancel: () => void;
+};
 
 export interface BoardControls {
   undo: () => void;
@@ -64,20 +86,65 @@ export function Canvas({
   // Internal element clipboard (copy/cut within meko + paste-styles).
   const clipboardRef = useRef<Element[]>([]);
   const editorRef = useRef<ActiveEditor | null>(null);
+  const onRegisterEditor = useCallback((e: ActiveEditor | null) => {
+    editorRef.current = e;
+  }, []);
   const savedRange = useRef<Range | null>(null);
   const [, setTick] = useState(0);
   // Pan/zoom viewport state + helpers (toWorld, clamping, wheel/space) live in useViewport.
+  // `view` is the committed (post-gesture) state; mid-gesture reads go through viewRef.
   const {
     view,
+    viewRef,
     panRef,
     spaceRef,
     toWorld,
     viewportCentre,
     setViewClamped,
+    commitView,
     setZoom,
     resetView,
     zoomToFit,
   } = useViewport(viewportRef, surfaceRef);
+  // One stable callback set shared by every ElementCard (see CardActions above).
+  const latestRef = useRef<CardActions>(null!);
+  const stable = useMemo(
+    () => ({
+      onSelect: (id: string) => latestRef.current.selectId(id),
+      onToggleSelect: (id: string) => latestRef.current.toggleSelect(id),
+      onContextMenu: (id: string, e: React.MouseEvent) =>
+        latestRef.current.openMenu(id, e),
+      onEdit: (id: string) => latestRef.current.edit(id),
+      onMove: (id: string, x: number, y: number) =>
+        latestRef.current.moveElement(id, x, y),
+      onResize: (id: string, w: number, h: number) =>
+        latestRef.current.patch(id, { w, h }),
+      onText: (id: string, text: string) =>
+        latestRef.current.patch(id, { text } as Partial<Element>),
+      onOpen: (id: string) => latestRef.current.openElement(id),
+      onCaption: (id: string, caption: string) =>
+        latestRef.current.patch(id, { caption } as Partial<Element>),
+      onCaptionFocus: (id: string) => latestRef.current.captionFocus(id),
+      onTodo: (id: string, p: { title?: string; items?: TodoItem[] }) =>
+        latestRef.current.patch(id, p as Partial<Element>),
+      onStartLink: (id: string, e: React.PointerEvent) =>
+        latestRef.current.startLink(id, e),
+      onConsumeFresh: () => latestRef.current.consumeFresh(),
+      onEmbeddedDragStart: (id: string, e: React.PointerEvent) =>
+        latestRef.current.startColumnChildDrag(id, e),
+      onColumnTitle: (id: string, title: string) =>
+        latestRef.current.patch(id, { title } as Partial<Element>),
+      onToggleCollapse: (id: string) => latestRef.current.toggleCollapse(id),
+      renderColumnChild: (cid: string) =>
+        latestRef.current.renderColumnChild(cid),
+      onDragMove: (id: string, cx: number, cy: number) =>
+        latestRef.current.handleDragMove(id, cx, cy),
+      onDragRelease: (id: string, cx: number, cy: number) =>
+        latestRef.current.handleDragRelease(id, cx, cy),
+      onDragCancel: () => latestRef.current.handleDragCancel(),
+    }),
+    [],
+  );
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -131,7 +198,16 @@ export function Canvas({
       if (!showCommentsRef.current) setUnreadComments(true);
     };
     c.onAccess = (canEdit) => setReadOnly(!canEdit);
-    const bump = () => setTick((t) => t + 1);
+    // Coalesce Yjs change bursts (a remote transaction, a multi-element drag) into one render per
+    // animation frame instead of one per observed change.
+    let bumpRaf = 0;
+    const bump = () => {
+      if (bumpRaf) return;
+      bumpRaf = requestAnimationFrame(() => {
+        bumpRaf = 0;
+        setTick((t) => t + 1);
+      });
+    };
     c.elements.observe(bump);
     c.connections.observe(bump);
     c.lines.observe(bump);
@@ -149,6 +225,7 @@ export function Canvas({
 
     void c.connect();
     return () => {
+      if (bumpRaf) cancelAnimationFrame(bumpRaf);
       mgr.off("stack-item-added", sync);
       mgr.off("stack-item-popped", sync);
       c.elements.unobserve(bump);
@@ -380,9 +457,12 @@ export function Canvas({
   const handleDragMove = (id: string, x: number, y: number) => {
     setDraggingId(id);
     setOverDelete(overDeleteZone(x, y));
-    // A non-column element dragged over a column previews where it'd drop.
-    setColDrop(
-      elementsById.get(id)?.type === "column" ? null : columnDropAt(x, y, id),
+    // A non-column element dragged over a column previews where it'd drop. Keep the previous
+    // object when the target hasn't changed, so the (frequent) drag flushes don't re-render.
+    const next =
+      elementsById.get(id)?.type === "column" ? null : columnDropAt(x, y, id);
+    setColDrop((prev) =>
+      prev?.colId === next?.colId && prev?.index === next?.index ? prev : next,
     );
   };
   // Drop over Delete removes; over a column reparents; otherwise just ends the drag. Operates on the
@@ -412,6 +492,21 @@ export function Canvas({
     setDraggingId(null);
     setOverDelete(false);
     setColDrop(null);
+  };
+  // Open a card's destination (alt-/double-click): a link opens its URL, a board navigates.
+  const openElement = (id: string) => {
+    const e = elementsById.get(id);
+    if (e?.type === "link") window.open(e.url, "_blank", "noopener,noreferrer");
+    else if (e?.type === "board") onOpenBoard(e.boardId);
+  };
+  const captionFocus = (id: string) => {
+    selectId(id);
+    setCaptionEditing(true);
+  };
+  const toggleCollapse = (id: string) => {
+    const e = connRef.current?.elements.get(id);
+    if (e?.type === "column")
+      patch(id, { collapsed: !e.collapsed } as Partial<Element>);
   };
 
   // Backspace/Delete removes the selected element — unless a text field is focused (editing).
@@ -574,8 +669,8 @@ export function Canvas({
       canUndo,
       canRedo,
       exportPng: () => onExport(),
-      zoomIn: () => setZoom(view.zoom * 1.2),
-      zoomOut: () => setZoom(view.zoom / 1.2),
+      zoomIn: () => setZoom(viewRef.current.zoom * 1.2),
+      zoomOut: () => setZoom(viewRef.current.zoom / 1.2),
       resetView,
       zoomToFit: () => zoomToFit(elements),
       toggleGrid: () => setShowGrid((g) => !g),
@@ -597,7 +692,9 @@ export function Canvas({
       return;
     }
     if (spaceRef.current || e.button === 1) {
-      panRef.current = { cx: e.clientX, cy: e.clientY, px: view.x, py: view.y };
+      // Anchor on the LIVE view (viewRef) — committed `view` state can lag a gesture.
+      const v = viewRef.current;
+      panRef.current = { cx: e.clientX, cy: e.clientY, px: v.x, py: v.y };
     } else {
       marqueeRef.current = {
         x0: e.clientX,
@@ -637,7 +734,10 @@ export function Canvas({
       commitLineDraw();
       return;
     }
-    panRef.current = null;
+    if (panRef.current) {
+      panRef.current = null;
+      commitView(); // pan moved the surface via the DOM only — sync React state now
+    }
     const m = marqueeRef.current;
     marqueeRef.current = null;
     if (!m) return;
@@ -1090,6 +1190,8 @@ export function Canvas({
   };
 
   // Render one element card. `embedded` cards live inside a column (relative flow, drag = reparent).
+  // All callbacks come from `stable` (one identity for the whole session, id-taking) so the
+  // memoised ElementCard only re-renders when its data props actually change.
   const renderElementCard = (el: Element, embedded: boolean) => (
     <ElementCard
       key={el.id}
@@ -1102,59 +1204,13 @@ export function Canvas({
           ? (el.mediaId && mediaUrls[el.mediaId]) || el.src
           : undefined
       }
-      onSelect={() => selectId(el.id)}
-      onToggleSelect={() => toggleSelect(el.id)}
-      onContextMenu={(e) => openMenu(el.id, e)}
-      onEdit={() => setEditingId(el.id)}
-      onMove={(x, y) => moveElement(el.id, x, y)}
-      onResize={(w, h) => patch(el.id, { w, h })}
-      onText={(text) => patch(el.id, { text } as Partial<Element>)}
-      onRegister={(e) => (editorRef.current = e)}
-      onOpen={
-        el.type === "link"
-          ? () => window.open(el.url, "_blank", "noopener,noreferrer")
-          : el.type === "board"
-            ? () => onOpenBoard(el.boardId)
-            : undefined
-      }
-      onCaption={
-        el.type === "image"
-          ? (h) => patch(el.id, { caption: h } as Partial<Element>)
-          : undefined
-      }
-      onTodo={
-        el.type === "todo"
-          ? (p) => patch(el.id, p as Partial<Element>)
-          : undefined
-      }
-      onStartLink={(e) => startLink(el.id, e)}
+      onRegister={onRegisterEditor}
       onSize={reportHeight}
       freshlyCreated={justCreated === el.id}
-      onConsumeFresh={() => setJustCreated(null)}
       readOnly={readOnly}
-      onCaptionFocus={() => {
-        selectId(el.id);
-        setCaptionEditing(true);
-      }}
-      onEmbeddedDragStart={(e) => startColumnChildDrag(el.id, e)}
-      onColumnTitle={
-        el.type === "column"
-          ? (t) => patch(el.id, { title: t } as Partial<Element>)
-          : undefined
-      }
-      onToggleCollapse={
-        el.type === "column"
-          ? () => patch(el.id, { collapsed: !el.collapsed } as Partial<Element>)
-          : undefined
-      }
       colDropIndex={
         el.type === "column" && colDrop?.colId === el.id
           ? colDrop.index
-          : undefined
-      }
-      renderColumnChild={
-        el.type === "column"
-          ? (cid: string) => renderColumnChild(cid)
           : undefined
       }
       shrink={draggingId === el.id && overDelete}
@@ -1162,15 +1218,32 @@ export function Canvas({
       anyDragging={draggingId !== null}
       zoom={view.zoom}
       toWorld={toWorld}
-      onDragMove={(x, y) => handleDragMove(el.id, x, y)}
-      onDragRelease={(x, y) => handleDragRelease(el.id, x, y)}
-      onDragCancel={handleDragCancel}
+      {...stable}
     />
   );
   // Resolve + render a column's child element (embedded).
   const renderColumnChild = (childId: string) => {
     const child = elementsById.get(childId);
     return child ? renderElementCard(child, true) : null;
+  };
+  // Re-point the stable wrappers at this render's implementations.
+  latestRef.current = {
+    selectId,
+    toggleSelect,
+    openMenu,
+    edit: (id) => setEditingId(id),
+    moveElement,
+    patch,
+    openElement,
+    captionFocus,
+    consumeFresh: () => setJustCreated(null),
+    toggleCollapse,
+    startLink,
+    startColumnChildDrag,
+    renderColumnChild,
+    handleDragMove,
+    handleDragRelease,
+    handleDragCancel,
   };
 
   return (
@@ -1273,10 +1346,11 @@ export function Canvas({
           <div
             ref={surfaceRef}
             className="absolute left-0 top-0 origin-top-left [background-size:24px_24px]"
+            // The pan/zoom transform is written imperatively by useViewport (per gesture event,
+            // no React render) — never set it here or a mid-gesture render would snap it back.
             style={{
               width: WORLD_W,
               height: WORLD_H,
-              transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
               backgroundImage: showGrid
                 ? `radial-gradient(circle, ${GRID_DOT_COLOR} 1px, transparent 1px)`
                 : undefined,

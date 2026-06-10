@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Element, TodoItem } from "../../types.ts";
 import { embedAspect, embedHeightFor, faviconUrl } from "../../lib/embed.ts";
 import { sanitizeHtml } from "../../lib/sanitize.ts";
@@ -245,7 +245,56 @@ function TodoBody({
   );
 }
 
-export function ElementCard({
+// All callbacks take the element id so the SAME function instance can be passed to every card —
+// that's what lets React.memo below actually bail out (per-element closures would defeat it).
+type ElementCardProps = {
+  el: Element;
+  selected: boolean;
+  editing: boolean;
+  imgUrl?: string;
+  onSelect: (id: string) => void;
+  onToggleSelect: (id: string) => void;
+  onContextMenu: (id: string, e: React.MouseEvent) => void;
+  onEdit: (id: string) => void;
+  onMove: (id: string, x: number, y: number) => void;
+  onResize: (id: string, w: number, h: number) => void;
+  onText: (id: string, t: string) => void;
+  onRegister: (e: ActiveEditor | null) => void;
+  onOpen: (id: string) => void;
+  onCaption: (id: string, html: string) => void;
+  onCaptionFocus: (id: string) => void;
+  onTodo: (id: string, patch: { title?: string; items?: TodoItem[] }) => void;
+  onStartLink: (id: string, e: React.PointerEvent) => void;
+  onSize?: (id: string, h: number) => void;
+  freshlyCreated?: boolean;
+  onConsumeFresh?: () => void;
+  embedded?: boolean;
+  onEmbeddedDragStart: (id: string, e: React.PointerEvent) => void;
+  onColumnTitle: (id: string, t: string) => void;
+  onToggleCollapse: (id: string) => void;
+  colDropIndex?: number;
+  renderColumnChild: (childId: string) => React.ReactNode;
+  readOnly?: boolean;
+  shrink: boolean;
+  dragging: boolean;
+  anyDragging?: boolean;
+  zoom: number;
+  toWorld: (cx: number, cy: number) => { x: number; y: number };
+  onDragMove: (id: string, cx: number, cy: number) => void;
+  onDragRelease: (id: string, cx: number, cy: number) => void;
+  onDragCancel: () => void;
+};
+
+// Cards are positioned with translate3d (compositor-only) rather than left/top (layout + paint per
+// change); `shrink` rides on the same transform.
+const cardTransform = (x: number, y: number, shrink: boolean) =>
+  `translate3d(${x}px, ${y}px, 0)${shrink ? " scale(0.4)" : ""}`;
+
+// While a card is dragged its own DOM node moves on every pointer event; Yjs (and the React render
+// it triggers — peers, arrows, column-drop preview) gets the position at this throttle instead.
+const MOVE_FLUSH_MS = 33;
+
+function ElementCardImpl({
   el,
   selected,
   editing,
@@ -281,48 +330,19 @@ export function ElementCard({
   onDragMove,
   onDragRelease,
   onDragCancel,
-}: {
-  el: Element;
-  selected: boolean;
-  editing: boolean;
-  imgUrl?: string;
-  onSelect: () => void;
-  onToggleSelect?: () => void;
-  onContextMenu?: (e: React.MouseEvent) => void;
-  onEdit: () => void;
-  onMove: (x: number, y: number) => void;
-  onResize: (w: number, h: number) => void;
-  onText: (t: string) => void;
-  onRegister: (e: ActiveEditor | null) => void;
-  onOpen?: () => void;
-  onCaption?: (html: string) => void;
-  onCaptionFocus?: () => void;
-  onTodo?: (patch: { title?: string; items?: TodoItem[] }) => void;
-  onStartLink?: (e: React.PointerEvent) => void;
-  onSize?: (id: string, h: number) => void;
-  freshlyCreated?: boolean;
-  onConsumeFresh?: () => void;
-  embedded?: boolean;
-  onEmbeddedDragStart?: (e: React.PointerEvent) => void;
-  onColumnTitle?: (t: string) => void;
-  onToggleCollapse?: () => void;
-  colDropIndex?: number;
-  renderColumnChild?: (childId: string) => React.ReactNode;
-  readOnly?: boolean;
-  shrink: boolean;
-  dragging: boolean;
-  anyDragging?: boolean;
-  zoom: number;
-  toWorld: (cx: number, cy: number) => { x: number; y: number };
-  onDragMove: (x: number, y: number) => void;
-  onDragRelease: (x: number, y: number) => void;
-  onDragCancel?: () => void;
-}) {
+}: ElementCardProps) {
   // Grab offset in WORLD coords so dragging works under any pan/zoom.
   const grab = useRef<{ x: number; y: number } | null>(null);
   // Where the card sat when a free drag began + the Escape handler that reverts to it.
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const escDrag = useRef<(() => void) | null>(null);
+  // Live drag position: the DOM node is moved directly per pointer event; Yjs gets the latest
+  // pending position every MOVE_FLUSH_MS. dragPos also feeds the JSX transform mid-drag so a React
+  // render (from the throttled Yjs write) can't snap the card back to a slightly-stale position.
+  const dragPos = useRef<{ x: number; y: number } | null>(null);
+  const pendingMove = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
+  const flushTimer = useRef<number | null>(null);
+  const liftedZ = useRef(false);
   const size = useRef<{ x: number; y: number; w: number; h: number } | null>(
     null,
   );
@@ -371,6 +391,35 @@ export function ElementCard({
     return () => ro.disconnect();
   }, [noteText, el.h, editing]);
 
+  // Flush the latest drag position to Yjs (+ the canvas drag affordances) at most once per
+  // MOVE_FLUSH_MS — the card itself already moved via its own DOM node.
+  const clearMoveFlush = () => {
+    if (flushTimer.current != null) {
+      clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+    }
+    pendingMove.current = null;
+  };
+  const flushMove = () => {
+    flushTimer.current = null;
+    const p = pendingMove.current;
+    if (!p || !grab.current) return;
+    pendingMove.current = null;
+    onMove(el.id, p.x, p.y);
+    onDragMove(el.id, p.cx, p.cy);
+  };
+  const dropZ = () => {
+    liftedZ.current = false;
+    const n = rootRef.current;
+    if (n) n.style.zIndex = "";
+  };
+  useEffect(
+    () => () => {
+      if (flushTimer.current != null) clearTimeout(flushTimer.current);
+    },
+    [],
+  );
+
   const onPointerDown = (e: React.PointerEvent) => {
     // Pressing a card pulls keyboard focus back out of any activated embed iframe — otherwise focus
     // stays trapped in the cross-origin iframe and window key handlers (Backspace/Delete) go dead.
@@ -378,18 +427,18 @@ export function ElementCard({
       document.activeElement.blur();
     e.stopPropagation(); // don't let the canvas deselect / pan
     // Cmd/Ctrl-click toggles multi-selection (no drag, no edit).
-    if ((e.metaKey || e.ctrlKey) && onToggleSelect) {
-      onToggleSelect();
+    if (e.metaKey || e.ctrlKey) {
+      onToggleSelect(el.id);
       return;
     }
     // A freshly-dropped element is already selected; treat the first press as a fresh select so it
     // drags rather than entering edit mode.
     justSelected.current = !selected || !!freshlyCreated;
     dragged.current = false;
-    if (!selected) onSelect();
+    if (!selected) onSelect(el.id);
     if (embedded) {
       // Inside a column: dragging reparents/reorders (handled by the parent), not free movement.
-      if (!editing && !readOnly) onEmbeddedDragStart?.(e);
+      if (!editing && !readOnly) onEmbeddedDragStart(el.id, e);
       return;
     }
     if (!editing && !readOnly && !el.locked) {
@@ -401,11 +450,21 @@ export function ElementCard({
       const onEsc = (ke: KeyboardEvent) => {
         if (ke.key !== "Escape" || !grab.current || !dragStart.current) return;
         ke.preventDefault();
-        onMove(dragStart.current.x, dragStart.current.y);
+        clearMoveFlush();
+        onMove(el.id, dragStart.current.x, dragStart.current.y);
+        const node = rootRef.current;
+        if (node)
+          node.style.transform = cardTransform(
+            dragStart.current.x,
+            dragStart.current.y,
+            false,
+          );
+        dragPos.current = null;
+        dropZ();
         grab.current = null;
         dragged.current = false;
         escDrag.current?.();
-        onDragCancel?.();
+        onDragCancel();
       };
       escDrag.current = () => {
         window.removeEventListener("keydown", onEsc, true);
@@ -418,24 +477,47 @@ export function ElementCard({
     if (!grab.current) return;
     dragged.current = true;
     const w = toWorld(e.clientX, e.clientY);
-    onMove(Math.round(w.x - grab.current.x), Math.round(w.y - grab.current.y));
-    onDragMove(e.clientX, e.clientY);
+    const nx = Math.round(w.x - grab.current.x);
+    const ny = Math.round(w.y - grab.current.y);
+    // Instant feedback: move this card's DOM node on every pointer event (compositor-only).
+    const node = rootRef.current;
+    if (node) {
+      if (!liftedZ.current) {
+        liftedZ.current = true;
+        node.style.zIndex = "1000";
+      }
+      node.style.transform = cardTransform(nx, ny, shrink);
+    }
+    dragPos.current = { x: nx, y: ny };
+    pendingMove.current = { x: nx, y: ny, cx: e.clientX, cy: e.clientY };
+    if (flushTimer.current == null)
+      flushTimer.current = window.setTimeout(flushMove, MOVE_FLUSH_MS);
   };
   const onPointerUp = (e: React.PointerEvent) => {
     escDrag.current?.();
-    if (grab.current && dragged.current) onDragRelease(e.clientX, e.clientY);
+    if (grab.current && dragged.current) {
+      // Push the final position before release handling — release may delete or reparent the card.
+      const p = pendingMove.current;
+      clearMoveFlush();
+      if (p) onMove(el.id, p.x, p.y);
+      onDragRelease(el.id, e.clientX, e.clientY);
+    }
+    dragPos.current = null;
+    dropZ();
     grab.current = null;
     if (freshlyCreated) onConsumeFresh?.(); // subsequent clicks edit normally
   };
   // First click selects; a second click (already selected, no drag) enters edit mode.
   // (⌘/Ctrl-click toggles multi-selection — handled in onPointerDown; Alt-click opens.)
+  // Card types a double-/alt-click can "open" (link → URL, board → navigate).
+  const openable = el.type === "link" || el.type === "board";
   const onClick = (e: React.MouseEvent) => {
     // A column child must not bubble its click to the parent column card — otherwise the column
     // would treat it as its own second click and drop into title-edit (which also blocks Backspace).
     if (embedded) e.stopPropagation();
     if (e.metaKey || e.ctrlKey) return; // multi-select handled on pointer down
-    if (e.altKey && onOpen) {
-      onOpen();
+    if (e.altKey && openable) {
+      onOpen(el.id);
       return;
     }
     // Top-level cards enter edit on the second click. Column children do NOT — single click only
@@ -448,18 +530,18 @@ export function ElementCard({
       !editing &&
       !dragged.current
     )
-      onEdit();
+      onEdit(el.id);
   };
   const onDoubleClick = (e: React.MouseEvent) => {
     if (embedded) e.stopPropagation(); // don't double-click the parent column too
     if (dragged.current) return;
     // A column child edits/activates on double-click (text editing, or making an embed interactive).
     if (embedded && activatable && !readOnly) {
-      onEdit();
+      onEdit(el.id);
       return;
     }
     // Non-text, non-embed cards (e.g. plain links) open on double-click.
-    if (!isText && !hasEmbed) onOpen?.();
+    if (!isText && !hasEmbed && openable) onOpen(el.id);
   };
 
   const startResize = (e: React.PointerEvent) => {
@@ -485,11 +567,12 @@ export function ElementCard({
     );
     if (lockAspect) {
       const aspect = size.current.w / size.current.h || 1;
-      onResize(w, Math.max(40, Math.round(w / aspect)));
+      onResize(el.id, w, Math.max(40, Math.round(w / aspect)));
     } else if (autoSize) {
-      onResize(w, el.h);
+      onResize(el.id, w, el.h);
     } else {
       onResize(
+        el.id,
         w,
         Math.max(
           60,
@@ -521,22 +604,41 @@ export function ElementCard({
       onPointerUp={onPointerUp}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenu}
+      onContextMenu={(e) => onContextMenu(el.id, e)}
       // Square corners; colour swaps on select so there's no layout shift. Top-level cards get a 2px
       // border; cards nested inside a column get a lighter 1px border.
       // While dragging: bring to front + go slightly transparent; shrink when over the Delete tool.
       className={`${embedded ? "relative w-full border" : "absolute border-2"} bg-white shadow-sm ${selected ? "border-primary ring-4 ring-primary/20" : "border-line"} ${editing ? "cursor-text" : "cursor-default"} ${dragging ? "opacity-80 shadow-xl" : ""}`}
       style={{
-        left: embedded ? undefined : el.x,
-        top: embedded ? undefined : el.y,
+        left: embedded ? undefined : 0,
+        top: embedded ? undefined : 0,
         width: embedded ? undefined : el.w,
         height: autoSize ? "auto" : el.h,
         background:
           isText || el.type === "todo" ? (s.fill ?? "#ffffff") : "#fff",
         zIndex: dragging ? 1000 : undefined,
-        transform: shrink ? "scale(0.4)" : undefined,
+        // Mid-drag, render the live drag position so the throttled Yjs write can't snap the card
+        // back to a slightly-stale x/y when React re-renders.
+        transform: embedded
+          ? shrink
+            ? "scale(0.4)"
+            : undefined
+          : cardTransform(
+              dragPos.current?.x ?? el.x,
+              dragPos.current?.y ?? el.y,
+              shrink,
+            ),
         transformOrigin: "center",
-        transition: "transform 0.12s ease",
+        // Only transition while shrinking toward Delete — a persistent transform transition would
+        // lag every drag/position change.
+        transition: shrink ? "transform 0.12s ease" : undefined,
+        // Skip render work for offscreen cards. `auto` keeps the last rendered size once measured,
+        // so layout (and connection geometry) doesn't collapse for auto-height cards.
+        contentVisibility: embedded ? undefined : "auto",
+        containIntrinsicSize: embedded
+          ? undefined
+          : `auto ${el.w}px auto ${Math.max(el.h, 40)}px`,
+        contain: embedded ? undefined : "layout style",
       }}
     >
       {isText ? (
@@ -553,7 +655,7 @@ export function ElementCard({
               html={el.type === "note" || el.type === "text" ? el.text : ""}
               editing={editing}
               style={textStyle}
-              onText={onText}
+              onText={(t) => onText(el.id, t)}
               onRegister={onRegister}
             />
           </div>
@@ -605,9 +707,9 @@ export function ElementCard({
               html={el.caption ?? ""}
               selected={selected}
               readOnly={readOnly}
-              onText={(h) => onCaption?.(h)}
+              onText={(h) => onCaption(el.id, h)}
               onRegister={onRegister}
-              onFocusCaption={() => onCaptionFocus?.()}
+              onFocusCaption={() => onCaptionFocus(el.id)}
             />
           )}
         </div>
@@ -707,7 +809,7 @@ export function ElementCard({
             el={el}
             editing={editing}
             readOnly={readOnly}
-            onChange={(p) => onTodo?.(p)}
+            onChange={(p) => onTodo(el.id, p)}
           />
         </div>
       ) : el.type === "board" ? (
@@ -775,23 +877,21 @@ export function ElementCard({
           )}
           {/* Header: collapse toggle, inline title, card count. */}
           <div className="flex items-center gap-1 px-2 pt-2">
-            {onToggleCollapse && (
-              <button
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={onToggleCollapse}
-                className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100"
-              >
-                <Icon.ChevronDown
-                  className={`text-base transition-transform ${el.collapsed ? "-rotate-90" : ""}`}
-                />
-              </button>
-            )}
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => onToggleCollapse(el.id)}
+              className="grid h-5 w-5 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100"
+            >
+              <Icon.ChevronDown
+                className={`text-base transition-transform ${el.collapsed ? "-rotate-90" : ""}`}
+              />
+            </button>
             {/* Two-stage: a plain title until the column is in edit mode (the second click). */}
             {editing && !readOnly ? (
               <input
                 autoFocus
                 value={el.title ?? ""}
-                onChange={(e) => onColumnTitle?.(e.target.value)}
+                onChange={(e) => onColumnTitle(el.id, e.target.value)}
                 onPointerDown={(e) => e.stopPropagation()}
                 placeholder="Column"
                 className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-400"
@@ -816,7 +916,7 @@ export function ElementCard({
                   {colDropIndex === i && (
                     <div className="my-0.5 h-0.5 rounded bg-primary" />
                   )}
-                  {renderColumnChild?.(cid)}
+                  {renderColumnChild(cid)}
                 </div>
               ))}
               {colDropIndex === el.children.length && (
@@ -836,10 +936,10 @@ export function ElementCard({
         </div>
       )}
 
-      {selected && onStartLink && !readOnly && !embedded && (
+      {selected && !readOnly && !embedded && (
         // Connect ball: drag onto another element to wire an arrow between them.
         <button
-          onPointerDown={onStartLink}
+          onPointerDown={(e) => onStartLink(el.id, e)}
           aria-label="Connect"
           title="Drag to connect"
           className="absolute -right-2.5 -top-2.5 z-10 h-4 w-4 cursor-crosshair rounded-full border-2 border-white bg-primary shadow"
@@ -860,3 +960,17 @@ export function ElementCard({
     </div>
   );
 }
+
+// Memoised so a canvas-wide render (selection change, a drag's throttled Yjs flush, a remote
+// update to ONE element) only re-renders the cards whose props actually changed. Columns render
+// their children inline via renderColumnChild, so a child's change isn't visible in the column's
+// own props — never bail out for them.
+export const ElementCard = memo(ElementCardImpl, (prev, next) => {
+  if (prev.el.type === "column" || next.el.type === "column") return false;
+  for (const k in next)
+    if (
+      prev[k as keyof ElementCardProps] !== next[k as keyof ElementCardProps]
+    )
+      return false;
+  return true;
+});
