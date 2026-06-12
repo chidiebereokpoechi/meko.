@@ -41,11 +41,42 @@ function decodeEntities(s: string): string {
     .replace(/&#39;|&apos;/g, "'");
 }
 
+// <link rel="image_src" href="..."> fallback (either attribute order).
+function linkRelImage(html: string): string | null {
+  const m =
+    html.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i) ??
+    html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']image_src["']/i);
+  return m ? decodeEntities(m[1]!.trim()) : null;
+}
+
+// Amazon product pages emit no og:image; the main image lives in
+// data-a-dynamic-image="{"<url>":[w,h], ...}" (entity-encoded JSON). Pick the largest by area.
+function dynamicImage(html: string): string | null {
+  const m = html.match(/data-a-dynamic-image=["'](\{[^"']+\})["']/i);
+  if (!m) return null;
+  try {
+    const map = JSON.parse(decodeEntities(m[1]!)) as Record<string, [number, number]>;
+    let best: string | null = null;
+    let bestArea = -1;
+    for (const [url, dims] of Object.entries(map)) {
+      const area = Array.isArray(dims) ? (dims[0] ?? 0) * (dims[1] ?? 0) : 0;
+      if (area > bestArea) {
+        bestArea = area;
+        best = url;
+      }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
 // Pure parser — unit-testable without any network.
 export function parseOpenGraph(html: string, baseUrl: string): Omit<UnfurlResult, "resolvedIp"> {
   const title = metaContent(html, "og:title") ?? html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? null;
   const description = metaContent(html, "og:description") ?? metaContent(html, "description");
-  let imageUrl = metaContent(html, "og:image");
+  // Image fallback chain: Open Graph → Twitter card → <link rel=image_src> → Amazon dynamic image.
+  let imageUrl = metaContent(html, "og:image") ?? metaContent(html, "twitter:image") ?? linkRelImage(html) ?? dynamicImage(html);
   // Resolve a relative og:image against the page URL, and drop anything non-http(s).
   if (imageUrl) {
     try {
@@ -110,6 +141,14 @@ export async function unfurl(rawUrl: string): Promise<UnfurlResult> {
       if (!loc) break;
       current = new URL(loc, current).toString(); // loop re-runs the SSRF check on the new target
       continue;
+    }
+
+    // A non-2xx response (e.g. eBay's Akamai bot wall returns a 403 with an HTML "Error Page")
+    // still carries text/html — parsing it would surface the error page's <title> as the link
+    // title. Treat it as no preview; the route won't cache an empty result, so it retries later.
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => {});
+      return { url: current, resolvedIp, title: null, description: null, imageUrl: null };
     }
 
     const type = res.headers.get("content-type") ?? "";

@@ -49,6 +49,23 @@ test("parseOpenGraph drops non-http(s) og:image and falls back to <title>", () =
   expect(r.imageUrl).toBeNull();
 });
 
+test("parseOpenGraph falls back to twitter:image when og:image is absent", () => {
+  const r = parseOpenGraph(`<meta name="twitter:image" content="https://example.com/t.png">`, "https://example.com");
+  expect(r.imageUrl).toBe("https://example.com/t.png");
+});
+
+test("parseOpenGraph falls back to <link rel=image_src>", () => {
+  const r = parseOpenGraph(`<link rel="image_src" href="https://example.com/ls.png">`, "https://example.com");
+  expect(r.imageUrl).toBe("https://example.com/ls.png");
+});
+
+test("parseOpenGraph extracts Amazon data-a-dynamic-image (largest by area)", () => {
+  // Amazon emits no og:image; the product image is in an entity-encoded JSON map of url -> [w,h].
+  const html = `<img id="landingImage" data-a-dynamic-image="{&quot;https://m.media-amazon.com/s.jpg&quot;:[355,355],&quot;https://m.media-amazon.com/l.jpg&quot;:[679,679]}">`;
+  const r = parseOpenGraph(html, "https://www.amazon.com/dp/X");
+  expect(r.imageUrl).toBe("https://m.media-amazon.com/l.jpg");
+});
+
 // A real loopback HTTP server must be refused by unfurl because it resolves to 127.0.0.1 (§7).
 let server: ReturnType<typeof Bun.serve>;
 beforeAll(() => {
