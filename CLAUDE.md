@@ -226,5 +226,8 @@ The canvas is plain DOM, fast because React is kept OFF the per-frame hot path:
    (`stable`/`latestRef` pattern in `Canvas.tsx`) shared by all cards — never pass per-element
    closures, they defeat the memo. Columns always re-render (children render inline through them).
 4. **Cards position via `transform: translate3d`** (compositor-only), never `left/top`. Plus
-   `content-visibility: auto` + `contain: layout style` on top-level cards.
+   `content-visibility: auto` + `contain: layout style` on top-level cards — applied to an **inner
+   content wrapper**, never the card root: `content-visibility` implies paint containment, which
+   clips descendants to the border box, and the selection-only "connect ball" overhangs the corner
+   (`-top/-right`). Putting containment on the root clips it away (invisible + unclickable).
 5. Yjs observer → `setTick` is rAF-coalesced; `colDrop` keeps identity when unchanged.

@@ -632,16 +632,28 @@ function ElementCardImpl({
         // Only transition while shrinking toward Delete — a persistent transform transition would
         // lag every drag/position change.
         transition: shrink ? "transform 0.12s ease" : undefined,
-        // Skip render work for offscreen cards. `auto` keeps the last rendered size once measured,
-        // so layout (and connection geometry) doesn't collapse for auto-height cards.
-        contentVisibility: embedded ? undefined : "auto",
-        containIntrinsicSize: embedded
-          ? undefined
-          : `auto ${el.w}px auto ${Math.max(el.h, 40)}px`,
-        contain: embedded ? undefined : "layout style",
       }}
     >
-      {isText ? (
+      {/* The perf containment lives on this inner wrapper, NOT the root: content-visibility implies
+          paint containment, which clips descendants to the border box. The connect ball overhangs
+          the corner (-top/-right), so it must sit OUTSIDE the contained box or it gets clipped and
+          becomes invisible/unclickable. Embedded cards have no containment (and no ball), so the
+          wrapper collapses to display:contents and changes nothing for them. */}
+      <div
+        className={embedded ? undefined : "relative h-full w-full"}
+        style={
+          embedded
+            ? { display: "contents" }
+            : {
+                // Skip render work for offscreen cards. `auto` keeps the last rendered size once
+                // measured, so layout (and connection geometry) doesn't collapse for auto-height cards.
+                contentVisibility: "auto",
+                containIntrinsicSize: `auto ${el.w}px auto ${Math.max(el.h, 40)}px`,
+                contain: "layout style",
+              }
+        }
+      >
+        {isText ? (
         <div className="relative flex h-full w-full flex-col overflow-hidden">
           {s.strip && (
             <div
@@ -935,6 +947,7 @@ function ElementCardImpl({
           {el.type}
         </div>
       )}
+      </div>
 
       {selected && !readOnly && !embedded && (
         // Connect ball: drag onto another element to wire an arrow between them.
