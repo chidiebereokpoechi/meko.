@@ -53,7 +53,15 @@ export const auth = new Elysia({ prefix: "/api/auth" })
     // Starting a login redirect is cheap and self-limited by the IdP; give it a looser, separate
     // bucket so repeated sign-in attempts don't lock out password login (and vice versa).
     if (path === "/api/auth/oidc/login") return enforceRateLimit(`rl:ip:${ip}:oidc`, 30, 60);
-    return enforceRateLimit(`rl:ip:${ip}:auth`, 10, 60);
+    // Credential submission (password login/signup) is the brute-force surface — keep it bounded
+    // per IP, but high enough that a shared/NAT'd egress IP carrying many real users won't trip it.
+    if (path === "/api/auth/login" || path === "/api/auth/signup")
+      return enforceRateLimit(`rl:ip:${ip}:auth`, 30, 60);
+    // Everything else under /api/auth (refresh, logout, me, oidc/providers, ws-ticket) isn't a
+    // credential guess — it requires a valid cookie/token or is read-only — yet it fires on every
+    // app boot, token refresh, and board open. Many users behind one IP generate a lot of it, so it
+    // gets its own much looser bucket and can't lock a shared IP out of signing in. (§12m)
+    return enforceRateLimit(`rl:ip:${ip}:auth-session`, 120, 60);
   })
   .post(
     "/signup",

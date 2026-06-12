@@ -96,11 +96,12 @@ test("refresh rotates the token; reusing the old one revokes the family (§9h)",
   expect(r2.status).toBe(401);
 });
 
-test("auth routes are IP rate-limited at 10/min (§12m)", async () => {
-  // 11 rapid logins from the same IP; the 11th must be 429. (login is cheap on a missing user.)
+test("credential routes are IP rate-limited at 30/min (§12m)", async () => {
+  // Password login/signup share a 30/min per-IP bucket; the 31st rapid login must be 429. (login is
+  // cheap on a missing user.) Session routes (refresh/me/...) use a separate, looser bucket.
   const e = email();
   let got429 = false;
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 32; i++) {
     const res = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: hdr("10.9.9.9"), body: JSON.stringify({ email: e, password: "x" }) });
     if (res.status === 429) {
       expect(res.headers.get("retry-after")).toBe("60");
