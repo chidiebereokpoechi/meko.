@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { API, login } from "../lib/auth.ts";
+import { API, login, signup } from "../lib/auth.ts";
 import { Button, TextField } from "./kit/index.ts";
 
 // Map the callback's ?auth_error code (set on a failed OIDC round trip) to a human message.
@@ -31,6 +31,10 @@ function GoogleG() {
 export function Login({ onAuthed }: { onAuthed: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  // Default to "create account" when the user arrived via an invite link — that's the only path
+  // that provisions a new account, and it's why they're here. Otherwise default to sign-in.
+  const [mode, setMode] = useState<"login" | "signup">(() => (window.location.pathname.startsWith("/invite/") ? "signup" : "login"));
   const [err, setErr] = useState<string | null>(() => readOidcError());
   const [busy, setBusy] = useState(false);
   // OIDC providers configured on the server (e.g. Authentik, Google) — only these get a button.
@@ -42,18 +46,20 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
       .catch(() => setProviders([]));
   }, []);
   // Carry the current path (e.g. /invite/<token>) through the IdP round trip so an invited user
-  // lands back on the invite after authenticating. There is no self-signup — accounts are created
-  // only when an invited (or bootstrap-allowlisted) email authenticates.
+  // lands back on the invite after authenticating. Accounts (password or OIDC) are created only
+  // when an invited (or bootstrap-allowlisted) email authenticates — the server gates it.
   const ret = encodeURIComponent(window.location.pathname + window.location.search);
   const oidcUrl = (providerId: string) => `${API}/api/auth/oidc/login?provider=${providerId}&return=${ret}`;
 
-  // <form onSubmit> → Enter submits. Login only; no signup from this screen.
+  // <form onSubmit> → Enter submits. Branches on mode: sign in vs. create account. Account
+  // creation is invite-only / bootstrap-gated server-side (a 403 → SIGNUP_CLOSED message).
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setBusy(true);
     try {
-      await login(email, password);
+      if (mode === "signup") await signup(email, password, displayName.trim());
+      else await login(email, password);
       onAuthed();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed");
@@ -62,12 +68,17 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
     }
   };
 
+  const toggleMode = () => {
+    setMode((m) => (m === "login" ? "signup" : "login"));
+    setErr(null);
+  };
+
   return (
     <div className="grid h-screen place-items-center bg-slate-100">
       <form className="flex w-80 flex-col gap-4 rounded-xl border-2 border-line-subtle bg-white px-8 py-9" onSubmit={submit}>
         <div>
           <img src="/meko.png" alt="meko." className="h-12 w-12 rounded-xl" />
-          <p className="mt-3 text-slate-400">Sign in to your boards</p>
+          <p className="mt-3 text-slate-400">{mode === "signup" ? "Create your account" : "Sign in to your boards"}</p>
         </div>
         {providers.map((p) => (
           <a
@@ -83,6 +94,9 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
             <span className="h-0.5 flex-1 bg-slate-100" /> or <span className="h-0.5 flex-1 bg-slate-100" />
           </div>
         )}
+        {mode === "signup" && (
+          <TextField name="name" label="Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        )}
         <TextField name="email" type="email" label="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <TextField
           name="password"
@@ -95,9 +109,25 @@ export function Login({ onAuthed }: { onAuthed: () => void }) {
           error={err}
         />
         <Button type="submit" loading={busy}>
-          Sign in
+          {mode === "signup" ? "Create account" : "Sign in"}
         </Button>
-        <p className="text-center text-xs text-slate-400">Access is invite-only. Open your invite link to join.</p>
+        <p className="text-center text-xs text-slate-400">
+          {mode === "signup" ? (
+            <>
+              Already have an account?{" "}
+              <button type="button" onClick={toggleMode} className="font-bold text-slate-500 hover:text-slate-700">
+                Sign in
+              </button>
+            </>
+          ) : (
+            <>
+              Have an invite?{" "}
+              <button type="button" onClick={toggleMode} className="font-bold text-slate-500 hover:text-slate-700">
+                Create an account
+              </button>
+            </>
+          )}
+        </p>
       </form>
     </div>
   );
